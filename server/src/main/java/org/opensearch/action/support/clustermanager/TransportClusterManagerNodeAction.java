@@ -69,7 +69,10 @@ import org.opensearch.discovery.ClusterManagerNotDiscoveredException;
 import org.opensearch.node.NodeClosedException;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.transport.*;
+import org.opensearch.transport.ConnectTransportException;
+import org.opensearch.transport.RemoteTransportException;
+import org.opensearch.transport.TransportException;
+import org.opensearch.transport.TransportService;
 
 import java.io.IOException;
 import java.util.function.Predicate;
