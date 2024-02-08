@@ -35,6 +35,7 @@ package org.opensearch.action.support.clustermanager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
+import org.opensearch.Version;
 import org.opensearch.action.ActionListenerResponseHandler;
 import org.opensearch.action.ActionRunnable;
 import org.opensearch.action.admin.cluster.state.term.ClusterTermVersionAction;
@@ -264,7 +265,7 @@ public abstract class TransportClusterManagerNodeAction<Request extends ClusterM
                     } else {
                         DiscoveryNode clusterManagerNode = nodes.getClusterManagerNode();
 
-                        if (checkTermVersion()) {
+                        if (clusterManagerNode.getVersion().onOrAfter(Version.V_2_11_0) && checkTermVersion()) {
                             transportService.sendRequest(
                                 clusterManagerNode,
                                 ClusterTermVersionAction.NAME,
