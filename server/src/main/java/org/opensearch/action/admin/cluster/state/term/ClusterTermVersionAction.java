@@ -35,7 +35,7 @@ package org.opensearch.action.admin.cluster.state.term;
 import org.opensearch.action.ActionType;
 
 /**
- * Transport action for obtaining cluster term
+ * Transport action for fetching cluster term
  *
  * @opensearch.internal
  */

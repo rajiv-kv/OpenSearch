@@ -53,7 +53,7 @@ import org.opensearch.transport.TransportService;
 import java.io.IOException;
 
 /**
- * Transport action for obtaining cluster term
+ * Transport action for obtaining cluster term and version from cluster-manager
  *
  * @opensearch.internal
  */

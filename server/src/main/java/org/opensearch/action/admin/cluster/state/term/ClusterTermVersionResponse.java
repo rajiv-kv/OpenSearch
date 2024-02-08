@@ -42,7 +42,7 @@ import org.opensearch.core.common.io.stream.StreamOutput;
 import java.io.IOException;
 
 /**
- * Response object for obtaining cluster term
+ * Response object of cluster term
  *
  * @opensearch.internal
  */
