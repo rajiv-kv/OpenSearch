@@ -48,9 +48,8 @@ import org.opensearch.core.common.Strings;
 import org.opensearch.core.common.unit.ByteSizeUnit;
 import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.core.index.Index;
-import org.opensearch.index.remote.RemoteStoreEnums.PathHashAlgorithm;
-import org.opensearch.index.remote.RemoteStoreEnums.PathType;
 import org.opensearch.index.remote.RemoteStorePathStrategy;
+import org.opensearch.index.remote.RemoteStoreUtils;
 import org.opensearch.index.translog.Translog;
 import org.opensearch.indices.replication.common.ReplicationType;
 import org.opensearch.ingest.IngestService;
@@ -62,8 +61,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -731,7 +728,6 @@ public final class IndexSettings {
     private volatile TimeValue remoteTranslogUploadBufferInterval;
     private final String remoteStoreTranslogRepository;
     private final String remoteStoreRepository;
-    private final boolean isRemoteSnapshot;
     private int remoteTranslogKeepExtraGen;
     private Version extendedCompatibilitySnapshotVersion;
 
@@ -766,6 +762,7 @@ public final class IndexSettings {
     private final boolean widenIndexSortType;
     private final boolean assignedOnRemoteNode;
     private final RemoteStorePathStrategy remoteStorePathStrategy;
+    private final boolean isTranslogMetadataEnabled;
 
     /**
      * The maximum age of a retention lease before it is considered expired.
@@ -921,9 +918,8 @@ public final class IndexSettings {
         remoteTranslogUploadBufferInterval = INDEX_REMOTE_TRANSLOG_BUFFER_INTERVAL_SETTING.get(settings);
         remoteStoreRepository = settings.get(IndexMetadata.SETTING_REMOTE_SEGMENT_STORE_REPOSITORY);
         this.remoteTranslogKeepExtraGen = INDEX_REMOTE_TRANSLOG_KEEP_EXTRA_GEN_SETTING.get(settings);
-        isRemoteSnapshot = IndexModule.Type.REMOTE_SNAPSHOT.match(this.settings);
 
-        if (isRemoteSnapshot && FeatureFlags.isEnabled(SEARCHABLE_SNAPSHOT_EXTENDED_COMPATIBILITY)) {
+        if (isRemoteSnapshot() && FeatureFlags.isEnabled(SEARCHABLE_SNAPSHOT_EXTENDED_COMPATIBILITY)) {
             extendedCompatibilitySnapshotVersion = SEARCHABLE_SNAPSHOT_EXTENDED_COMPATIBILITY_MINIMUM_VERSION;
         } else {
             extendedCompatibilitySnapshotVersion = Version.CURRENT.minimumIndexCompatibilityVersion();
@@ -990,7 +986,9 @@ public final class IndexSettings {
          */
         widenIndexSortType = IndexMetadata.SETTING_INDEX_VERSION_CREATED.get(settings).before(V_2_7_0);
         assignedOnRemoteNode = RemoteStoreNodeAttribute.isRemoteDataAttributePresent(this.getNodeSettings());
-        remoteStorePathStrategy = determineRemoteStorePathStrategy();
+        remoteStorePathStrategy = RemoteStoreUtils.determineRemoteStorePathStrategy(indexMetadata);
+
+        isTranslogMetadataEnabled = RemoteStoreUtils.determineTranslogMetadataEnabled(indexMetadata);
 
         setEnableFuzzySetForDocId(scopedSettings.get(INDEX_DOC_ID_FUZZY_SET_ENABLED_SETTING));
         setDocIdFuzzySetFalsePositiveProbability(scopedSettings.get(INDEX_DOC_ID_FUZZY_SET_FALSE_POSITIVE_PROBABILITY_SETTING));
@@ -1278,7 +1276,7 @@ public final class IndexSettings {
      * Returns true if this is remote/searchable snapshot
      */
     public boolean isRemoteSnapshot() {
-        return isRemoteSnapshot;
+        return indexMetadata.isRemoteSnapshot();
     }
 
     /**
@@ -1911,19 +1909,11 @@ public final class IndexSettings {
         this.docIdFuzzySetFalsePositiveProbability = docIdFuzzySetFalsePositiveProbability;
     }
 
-    private RemoteStorePathStrategy determineRemoteStorePathStrategy() {
-        Map<String, String> remoteCustomData = indexMetadata.getCustomData(IndexMetadata.REMOTE_STORE_CUSTOM_KEY);
-        assert remoteCustomData == null || remoteCustomData.containsKey(PathType.NAME);
-        if (remoteCustomData != null && remoteCustomData.containsKey(PathType.NAME)) {
-            PathType pathType = PathType.parseString(remoteCustomData.get(PathType.NAME));
-            String hashAlgoStr = remoteCustomData.get(PathHashAlgorithm.NAME);
-            PathHashAlgorithm hashAlgorithm = Objects.nonNull(hashAlgoStr) ? PathHashAlgorithm.parseString(hashAlgoStr) : null;
-            return new RemoteStorePathStrategy(pathType, hashAlgorithm);
-        }
-        return new RemoteStorePathStrategy(PathType.FIXED);
-    }
-
     public RemoteStorePathStrategy getRemoteStorePathStrategy() {
         return remoteStorePathStrategy;
+    }
+
+    public boolean isTranslogMetadataEnabled() {
+        return isTranslogMetadataEnabled;
     }
 }

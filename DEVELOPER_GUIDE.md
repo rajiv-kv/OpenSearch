@@ -57,10 +57,12 @@
       - [Developer API](#developer-api)
       - [User API](#user-api)
       - [Experimental Development](#experimental-development)
+      - [API Compatibility Checks](#api-compatibility-checks)
     - [Backports](#backports)
     - [LineLint](#linelint)
     - [Lucene Snapshots](#lucene-snapshots)
     - [Flaky Tests](#flaky-tests)
+    - [Gradle Check Metrics Dashboard](#gradle-check-metrics-dashboard)
 
 # Developer Guide
 
@@ -607,6 +609,20 @@ a LTS feature but with additional guard rails and communication mechanisms to si
 release, or be removed altogether. Any Developer or User APIs implemented along with the experimental feature should be marked with `@ExperimentalApi` (or documented as
 `@opensearch.experimental`) annotation to signal the implementation is not subject to LTS and does not follow backwards compatibility guidelines.
 
+#### API Compatibility Checks
+
+The compatibility checks for public APIs are performed using [japicmp](https://siom79.github.io/japicmp/) and are available as separate Gradle tasks (those are run on demand at the moment):
+
+```
+./gradlew japicmp
+```
+
+By default, the API compatibility checks are run against the latest released version of the OpenSearch, however the target version to compare to could be provided using system property during the build, fe.:
+
+```
+./gradlew japicmp  -Djapicmp.compare.version=2.14.0-SNAPSHOT
+```
+
 ### Backports
 
 The Github workflow in [`backport.yml`](.github/workflows/backport.yml) creates backport PRs automatically when the original PR with an appropriate label `backport <backport-branch-name>` is merged to main with the backport workflow run successfully on the PR. For example, if a PR on main needs to be backported to `1.x` branch, add a label `backport 1.x` to the PR and make sure the backport workflow runs on the PR along with other checks. Once this PR is merged to main, the workflow will create a backport PR to the `1.x` branch.
@@ -645,3 +661,7 @@ If you encounter a build/test failure in CI that is unrelated to the change in y
 4. If an existing issue is found, paste a link to the known issue in a comment to your PR.
 5. If no existing issue is found, open one.
 6. Retry CI via the GitHub UX or by pushing an update to your PR.
+
+### Gradle Check Metrics Dashboard
+
+To get the comprehensive insights and analysis of the Gradle Check test failures, visit the [OpenSearch Gradle Check Metrics Dashboard](https://metrics.opensearch.org/_dashboards/app/dashboards#/view/e5e64d40-ed31-11ee-be99-69d1dbc75083). This dashboard is part of the [OpenSearch Metrics Project](https://github.com/opensearch-project/opensearch-metrics) initiative. The dashboard contains multiple data points that can help investigate and resolve flaky failures. Additionally, this dashboard can be used to drill down, slice, and dice the data using multiple supported filters, which further aids in troubleshooting and resolving issues.
