@@ -1452,6 +1452,7 @@ public class Coordinator extends AbstractLifecycleComponent implements Discovery
         @Override
         protected void onActiveClusterManagerFound(DiscoveryNode clusterManagerNode, long term) {
             synchronized (mutex) {
+                logger.info("sending join request to {}", clusterManagerNode);
                 ensureTermAtLeast(clusterManagerNode, term);
                 joinHelper.sendJoinRequest(clusterManagerNode, getCurrentTerm(), joinWithDestination(lastJoin, clusterManagerNode, term));
             }

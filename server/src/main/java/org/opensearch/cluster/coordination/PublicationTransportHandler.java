@@ -73,7 +73,7 @@ import java.util.function.Function;
  *
  * @opensearch.internal
  */
-public class PublicationTransportHandler {
+    public class PublicationTransportHandler {
 
     private static final Logger logger = LogManager.getLogger(PublicationTransportHandler.class);
 

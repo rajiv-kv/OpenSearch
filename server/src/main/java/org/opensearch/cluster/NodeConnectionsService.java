@@ -387,6 +387,11 @@ public class NodeConnectionsService extends AbstractLifecycleComponent {
         private final Runnable disconnectActivity = new AbstractRunnable() {
             @Override
             protected void doRun() {
+//                try {
+//                    Thread.sleep(5000);
+//                } catch (InterruptedException e) {
+//                    throw new RuntimeException(e);
+//                }
                 assert Thread.holdsLock(mutex) == false : "mutex unexpectedly held";
                 transportService.disconnectFromNode(discoveryNode);
                 consecutiveFailureCount.set(0);
@@ -477,6 +482,7 @@ public class NodeConnectionsService extends AbstractLifecycleComponent {
             Runnable activity,
             String cancellationMessage
         ) {
+
             assert Thread.holdsLock(mutex) : "mutex not held";
             assert newActivityType.equals(ActivityType.IDLE) == false;
 
@@ -510,6 +516,11 @@ public class NodeConnectionsService extends AbstractLifecycleComponent {
                     cleanup = e == null ? () -> oldFuture.onResponse(null) : () -> oldFuture.onFailure(e);
 
                     if (completedActivityType.equals(ActivityType.DISCONNECTING)) {
+//                            try {
+//                                Thread.sleep(1000);
+//                            } catch (InterruptedException e1) {
+//                                throw new RuntimeException(e1);
+//                            }
                         final ConnectionTarget removedTarget = targetsByNode.remove(discoveryNode);
                         assert removedTarget == this : removedTarget + " vs " + this;
                     }

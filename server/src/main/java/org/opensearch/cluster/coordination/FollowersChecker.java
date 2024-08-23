@@ -175,6 +175,9 @@ public class FollowersChecker {
      * Update the set of known nodes, starting to check any new ones and stopping checking any previously-known-but-now-unknown ones.
      */
     public void setCurrentNodes(DiscoveryNodes discoveryNodes) {
+        logger.info("[{}]Setting current node {}", Thread.currentThread().getName()
+
+            ,discoveryNodes);
         synchronized (mutex) {
             final Predicate<DiscoveryNode> isUnknownNode = n -> discoveryNodes.nodeExists(n) == false;
             followerCheckers.keySet().removeIf(isUnknownNode);
@@ -355,7 +358,9 @@ public class FollowersChecker {
             }
 
             final FollowerCheckRequest request = new FollowerCheckRequest(fastResponseState.term, transportService.getLocalNode());
-            logger.trace("handleWakeUp: checking {} with {}", discoveryNode, request);
+            if (discoveryNode.getName().equals("node_t2")) {
+                logger.info("handleWakeUp: checking {} with {}", discoveryNode, request);
+            }
 
             transportService.sendRequest(
                 discoveryNode,

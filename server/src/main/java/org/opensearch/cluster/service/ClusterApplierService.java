@@ -565,6 +565,7 @@ public class ClusterApplierService extends AbstractLifecycleComponent implements
         try (TimingHandle ignored = stopWatch.timing("connecting to new nodes")) {
             connectToNodesAndWait(newClusterState);
         }
+        //node-join
 
         // nothing to do until we actually recover from the gateway or any other block indicates we need to disable persistency
         if (clusterChangedEvent.state().blocks().disableStatePersistence() == false && clusterChangedEvent.metadataChanged()) {

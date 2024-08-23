@@ -122,6 +122,8 @@ public class ClusterConnectionManager implements ConnectionManager {
         ConnectionValidator connectionValidator,
         ActionListener<Void> listener
     ) throws ConnectTransportException {
+        logger.info("[{}]connecting to node [{}]", Thread.currentThread().getName(), node);
+
         ConnectionProfile resolvedProfile = ConnectionProfile.resolveConnectionProfile(connectionProfile, defaultProfile);
         if (node == null) {
             listener.onFailure(new ConnectTransportException(null, "can't connect to a null node"));
@@ -159,16 +161,18 @@ public class ClusterConnectionManager implements ConnectionManager {
                 assert Transports.assertNotTransportThread("connection validator success");
                 try {
                     if (connectedNodes.putIfAbsent(node, conn) != null) {
-                        logger.debug("existing connection to node [{}], closing new redundant connection", node);
+                        logger.info("[{}]existing connection to node [{}], closing new redundant connection", Thread.currentThread().getName(), node);
                         IOUtils.closeWhileHandlingException(conn);
                     } else {
-                        logger.debug("connected to node [{}]", node);
+                        logger.info("[{}]connected to node [{}]", Thread.currentThread().getName()
+                            ,node);
                         try {
                             connectionListener.onNodeConnected(node, conn);
                         } finally {
                             final Transport.Connection finalConnection = conn;
                             conn.addCloseListener(ActionListener.wrap(() -> {
-                                logger.trace("unregistering {} after connection close and marking as disconnected", node);
+                                logger.info("[{}] unregistering {} after connection close and marking as disconnected", Thread.currentThread().getName()
+                                    , node);
                                 connectedNodes.remove(node, finalConnection);
                                 connectionListener.onNodeDisconnected(node, conn);
                             }));

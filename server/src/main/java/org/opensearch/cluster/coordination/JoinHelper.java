@@ -243,6 +243,7 @@ public class JoinHelper {
 
     }
 
+
     private void runJoinValidators(
         Supplier<ClusterState> currentStateSupplier,
         ClusterState incomingState,
@@ -394,7 +395,7 @@ public class JoinHelper {
                     @Override
                     public void handleResponse(Empty response) {
                         pendingOutgoingJoins.remove(dedupKey);
-                        logger.debug("successfully joined {} with {}", destination, joinRequest);
+                        logger.info("successfully joined {} with {}", destination, joinRequest);
                         lastFailedJoinAttempt.set(null);
                         nodeCommissioned.accept(true);
                         onCompletion.run();
