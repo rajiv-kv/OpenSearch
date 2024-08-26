@@ -293,7 +293,7 @@ public class RemoteManifestManager {
         }
     }
 
-    static String getManifestFilePrefixForTermVersion(long term, long version) {
+    public static String getManifestFilePrefixForTermVersion(long term, long version) {
         return String.join(
             DELIMITER,
             RemoteClusterMetadataManifest.MANIFEST,

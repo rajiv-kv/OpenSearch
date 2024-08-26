@@ -386,6 +386,8 @@ public class Coordinator extends AbstractLifecycleComponent implements Discovery
             coordinationState.get().handleCommit(applyCommitRequest);
             final ClusterState committedState = hideStateIfNotRecovered(coordinationState.get().getLastAcceptedState());
             applierState = mode == Mode.CANDIDATE ? clusterStateWithNoClusterManagerBlock(committedState) : committedState;
+            clusterApplier.setPreCommitState(applierState);
+
             if (applyCommitRequest.getSourceNode().equals(getLocalNode())) {
                 // cluster-manager node applies the committed state at the end of the publication process, not here.
                 applyListener.onResponse(null);

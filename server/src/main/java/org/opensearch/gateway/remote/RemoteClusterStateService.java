@@ -33,6 +33,7 @@ import org.opensearch.cluster.routing.remote.RemoteRoutingTableService;
 import org.opensearch.cluster.routing.remote.RemoteRoutingTableServiceFactory;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.Nullable;
+import org.opensearch.common.annotation.InternalApi;
 import org.opensearch.common.blobstore.BlobContainer;
 import org.opensearch.common.blobstore.BlobStore;
 import org.opensearch.common.settings.ClusterSettings;
@@ -118,6 +119,7 @@ import static org.opensearch.node.remotestore.RemoteStoreNodeAttribute.isRemoteS
  *
  * @opensearch.internal
  */
+@InternalApi
 public class RemoteClusterStateService implements Closeable {
 
     private static final Logger logger = LogManager.getLogger(RemoteClusterStateService.class);
@@ -175,6 +177,7 @@ public class RemoteClusterStateService implements Closeable {
         + "updated : [{}], custom metadata updated : [{}], indices routing updated : [{}]";
     private final boolean isPublicationEnabled;
 
+    private final RemoteClusterStateCache remoteClusterStateCache;
     // ToXContent Params with gateway mode.
     // We are using gateway context mode to persist all custom metadata.
     public static final ToXContent.Params FORMAT_PARAMS;
@@ -226,6 +229,7 @@ public class RemoteClusterStateService implements Closeable {
             ClusterName.CLUSTER_NAME_SETTING.get(settings).value()
         );
         remoteClusterStateCleanupManager = new RemoteClusterStateCleanupManager(this, clusterService, remoteRoutingTableService);
+        remoteClusterStateCache = new RemoteClusterStateCache();
     }
 
     /**
@@ -1355,8 +1359,14 @@ public class RemoteClusterStateService implements Closeable {
     ) throws IOException {
         final ClusterState clusterState;
         final long startTimeNanos = relativeTimeNanosSupplier.getAsLong();
+
+        ClusterState stateFromCache = remoteClusterStateCache.getState(clusterName, manifest);
+        if (stateFromCache != null) {
+            return stateFromCache;
+        }
+        ClusterState retState = null;
         if (manifest.onOrAfterCodecVersion(CODEC_V2)) {
-            clusterState = readClusterStateInParallel(
+            retState = readClusterStateInParallel(
                 ClusterState.builder(new ClusterName(clusterName)).build(),
                 manifest,
                 manifest.getClusterUUID(),
@@ -1402,19 +1412,24 @@ public class RemoteClusterStateService implements Closeable {
             );
             Metadata.Builder mb = Metadata.builder(remoteGlobalMetadataManager.getGlobalMetadata(manifest.getClusterUUID(), manifest));
             mb.indices(state.metadata().indices());
-            clusterState = ClusterState.builder(state).metadata(mb).build();
+            retState = ClusterState.builder(state).metadata(mb).build();
         }
         final long durationMillis = TimeValue.nsecToMSec(relativeTimeNanosSupplier.getAsLong() - startTimeNanos);
         remoteStateStats.stateFullDownloadSucceeded();
         remoteStateStats.stateFullDownloadTook(durationMillis);
-
-        return clusterState;
+        if (includeEphemeral) {
+            // cache only if the entire cluster-state is present
+            remoteClusterStateCache.putState(retState);
+        }
+        return retState;
     }
 
     public ClusterState getClusterStateUsingDiff(ClusterMetadataManifest manifest, ClusterState previousState, String localNodeId) {
         assert manifest.getDiffManifest() != null : "Diff manifest null which is required for downloading cluster state";
         final long startTimeNanos = relativeTimeNanosSupplier.getAsLong();
         ClusterStateDiffManifest diff = manifest.getDiffManifest();
+        boolean includeEphemeral = true;
+
         List<UploadedIndexMetadata> updatedIndices = diff.getIndicesUpdated().stream().map(idx -> {
             Optional<UploadedIndexMetadata> uploadedIndexMetadataOptional = manifest.getIndices()
                 .stream()
@@ -1463,7 +1478,7 @@ public class RemoteClusterStateService implements Closeable {
             manifest.getDiffManifest() != null
                 && manifest.getDiffManifest().getIndicesRoutingDiffPath() != null
                 && !manifest.getDiffManifest().getIndicesRoutingDiffPath().isEmpty(),
-            true
+            includeEphemeral
         );
         ClusterState.Builder clusterStateBuilder = ClusterState.builder(updatedClusterState);
         Metadata.Builder metadataBuilder = Metadata.builder(updatedClusterState.metadata());
@@ -1497,7 +1512,6 @@ public class RemoteClusterStateService implements Closeable {
             .metadata(metadataBuilder)
             .routingTable(new RoutingTable(manifest.getRoutingTableVersion(), indexRoutingTables))
             .build();
-
         if (checksumValidationEnabled && manifest.getClusterStateChecksum() != null) {
             validateClusterStateFromChecksum(manifest, clusterState, previousState.getClusterName().value(), localNodeId, false);
         }
@@ -1505,6 +1519,9 @@ public class RemoteClusterStateService implements Closeable {
         remoteStateStats.stateDiffDownloadSucceeded();
         remoteStateStats.stateDiffDownloadTook(durationMillis);
 
+        assert includeEphemeral == true;
+        // newState includes all the fields of cluster-state (includeEphemeral=true always)
+        remoteClusterStateCache.putState(clusterState);
         return clusterState;
     }
 
@@ -1869,6 +1886,7 @@ public class RemoteClusterStateService implements Closeable {
         return remoteStateStats;
     }
 
+<<<<<<< HEAD
     public PersistedStateStats getUploadStats() {
         return remoteStateStats.getUploadStats();
     }
@@ -1888,4 +1906,10 @@ public class RemoteClusterStateService implements Closeable {
     public void diffDownloadFailed() {
         remoteStateStats.stateDiffDownloadFailed();
     }
+=======
+    RemoteClusterStateCache getRemoteClusterStateCache() {
+        return remoteClusterStateCache;
+    }
+
+>>>>>>> f2908f0b666 (using remote cluster-state as fallback)
 }

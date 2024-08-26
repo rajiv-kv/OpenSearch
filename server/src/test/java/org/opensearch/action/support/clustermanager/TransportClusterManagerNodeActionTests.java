@@ -21,6 +21,7 @@ import org.opensearch.action.admin.cluster.settings.TransportClusterUpdateSettin
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.action.support.ThreadedActionListener;
+import org.opensearch.action.support.clustermanager.term.GetTermVersionResponse;
 import org.opensearch.action.support.replication.ClusterStateCreationUtils;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -30,6 +31,8 @@ import org.opensearch.cluster.block.ClusterBlock;
 import org.opensearch.cluster.block.ClusterBlockException;
 import org.opensearch.cluster.block.ClusterBlockLevel;
 import org.opensearch.cluster.block.ClusterBlocks;
+import org.opensearch.cluster.coordination.ClusterStateTermVersion;
+import org.opensearch.cluster.coordination.CoordinationMetadata;
 import org.opensearch.cluster.coordination.FailedToCommitClusterStateException;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.metadata.Metadata;
@@ -54,6 +57,8 @@ import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.discovery.ClusterManagerNotDiscoveredException;
+import org.opensearch.gateway.remote.ClusterMetadataManifest;
+import org.opensearch.gateway.remote.RemoteClusterStateService;
 import org.opensearch.node.NodeClosedException;
 import org.opensearch.node.remotestore.RemoteStoreNodeService;
 import org.opensearch.snapshots.EmptySnapshotsInfoService;
@@ -84,6 +89,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.mockito.Mockito;
+
 import static org.opensearch.index.remote.RemoteMigrationIndexMetadataUpdaterTests.createIndexMetadataWithRemoteStoreSettings;
 import static org.opensearch.node.remotestore.RemoteStoreNodeAttribute.REMOTE_STORE_SEGMENT_REPOSITORY_NAME_ATTRIBUTE_KEY;
 import static org.opensearch.node.remotestore.RemoteStoreNodeAttribute.REMOTE_STORE_TRANSLOG_REPOSITORY_NAME_ATTRIBUTE_KEY;
@@ -93,6 +100,9 @@ import static org.opensearch.test.ClusterServiceUtils.setState;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 
 public class TransportClusterManagerNodeActionTests extends OpenSearchTestCase {
     private static ThreadPool threadPool;
@@ -208,6 +218,8 @@ public class TransportClusterManagerNodeActionTests extends OpenSearchTestCase {
     }
 
     class Action extends TransportClusterManagerNodeAction<Request, Response> {
+        private boolean localExecuteSupported = true;
+
         Action(String actionName, TransportService transportService, ClusterService clusterService, ThreadPool threadPool) {
             super(
                 actionName,
@@ -218,6 +230,18 @@ public class TransportClusterManagerNodeActionTests extends OpenSearchTestCase {
                 Request::new,
                 new IndexNameExpressionResolver(new ThreadContext(Settings.EMPTY))
             );
+        }
+
+        Action(
+            String actionName,
+            TransportService transportService,
+            ClusterService clusterService,
+            ThreadPool threadPool,
+            RemoteClusterStateService clusterStateService
+        ) {
+            this(actionName, transportService, clusterService, threadPool);
+            this.remoteClusterStateService = clusterStateService;
+            this.localExecuteSupported = true;
         }
 
         @Override
@@ -245,6 +269,10 @@ public class TransportClusterManagerNodeActionTests extends OpenSearchTestCase {
         @Override
         protected ClusterBlockException checkBlock(Request request, ClusterState state) {
             return null; // default implementation, overridden in specific tests
+        }
+
+        public boolean isLocalExecuteSupported() {
+            return localExecuteSupported;
         }
     }
 
@@ -712,6 +740,41 @@ public class TransportClusterManagerNodeActionTests extends OpenSearchTestCase {
 
         assertFalse(retried.get());
         assertFalse(exception.get());
+    }
+
+    public void testFetchFromRemoteStore() throws InterruptedException, BrokenBarrierException, ExecutionException, IOException {
+        setState(clusterService, ClusterStateCreationUtils.state(localNode, remoteNode, allNodes));
+
+        ClusterState state = clusterService.state();
+        RemoteClusterStateService remoteClusterStateService = Mockito.mock(RemoteClusterStateService.class);
+        ClusterMetadataManifest manifest = ClusterMetadataManifest.builder()
+            .clusterTerm(state.term() + 1)
+            .stateVersion(state.version() + 1)
+            .build();
+        when(remoteClusterStateService.getClusterMetadataManifestByFileName(eq(state.stateUUID()), any())).thenReturn(manifest);
+        when(remoteClusterStateService.getClusterStateForManifest(state.getClusterName().value(), manifest, localNode.getId(), true))
+            .thenReturn(buildClusterState(state, state.term() + 1, state.version() + 1));
+
+        PlainActionFuture<Response> listener = new PlainActionFuture<>();
+        Request request = new Request();
+        Action action = new Action("internal:testAction", transportService, clusterService, threadPool, remoteClusterStateService);
+        action.execute(request, listener);
+
+        CapturingTransport.CapturedRequest capturedRequest = transport.capturedRequests()[0];
+        // mismatch term and version
+        GetTermVersionResponse termResp = new GetTermVersionResponse(
+            new ClusterStateTermVersion(state.getClusterName(), state.metadata().clusterUUID(), state.term() + 1, state.version() + 1)
+        );
+        transport.handleResponse(capturedRequest.requestId, termResp);
+        // no more transport calls
+        assertThat(transport.capturedRequests().length, equalTo(1));
+        assertTrue(listener.isDone());
+    }
+
+    private ClusterState buildClusterState(ClusterState state, long term, long version) {
+        CoordinationMetadata.Builder coordMetadataBuilder = CoordinationMetadata.builder().term(term);
+        Metadata newMetadata = Metadata.builder().coordinationMetadata(coordMetadataBuilder.build()).build();
+        return ClusterState.builder(state).version(version).metadata(newMetadata).build();
     }
 
     public void testDontAllowSwitchingToStrictCompatibilityModeForMixedCluster() {

@@ -76,7 +76,7 @@ public class TransportGetTermVersionAction extends TransportClusterManagerNodeRe
         ClusterState state,
         ActionListener<GetTermVersionResponse> listener
     ) throws Exception {
-        ActionListener.completeWith(listener, () -> buildResponse(request, state));
+        ActionListener.completeWith(listener, () -> buildResponse(request, clusterService.preCommitState()));
     }
 
     private GetTermVersionResponse buildResponse(GetTermVersionRequest request, ClusterState state) {

@@ -46,7 +46,6 @@ import org.opensearch.common.remote.AbstractClusterMetadataWriteableBlobEntity;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.util.FeatureFlags;
-import org.opensearch.core.ParseField;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesArray;
 import org.opensearch.core.common.bytes.BytesReference;
@@ -2325,6 +2324,53 @@ public class RemoteClusterStateServiceTests extends OpenSearchTestCase {
         );
     }
 
+    public void testReadLatestClusterStateFromCache() throws IOException {
+        // when(blobStoreRepository.getNamedXContentRegistry()).thenReturn(new NamedXContentRegistry(
+        // List.of(new NamedXContentRegistry.Entry(Metadata.Custom.class, new ParseField(IndexGraveyard.TYPE),
+        // IndexGraveyard::fromXContent))));
+        final ClusterState clusterState = generateClusterStateWithGlobalMetadata().nodes(nodesWithLocalNodeClusterManager()).build();
+        remoteClusterStateService.start();
+
+        final ClusterMetadataManifest expectedManifest = ClusterMetadataManifest.builder()
+            .indices(List.of())
+            .clusterTerm(1L)
+            .stateVersion(13)
+            .stateUUID("state-uuid")
+            .clusterUUID("cluster-uuid")
+            .codecVersion(MANIFEST_CURRENT_CODEC_VERSION)
+            .coordinationMetadata(new ClusterMetadataManifest.UploadedMetadataAttribute(COORDINATION_METADATA, "mock-coordination-file"))
+            .settingMetadata(new ClusterMetadataManifest.UploadedMetadataAttribute(SETTING_METADATA, "mock-setting-file"))
+            .templatesMetadata(new ClusterMetadataManifest.UploadedMetadataAttribute(TEMPLATES_METADATA, "mock-templates-file"))
+            .put(
+                IndexGraveyard.TYPE,
+                new ClusterMetadataManifest.UploadedMetadataAttribute(IndexGraveyard.TYPE, "mock-custom-" + IndexGraveyard.TYPE + "-file")
+            )
+            .nodeId("nodeA")
+            .opensearchVersion(VersionUtils.randomOpenSearchVersion(random()))
+            .previousClusterUUID("prev-cluster-uuid")
+            .routingTableVersion(1)
+            .indicesRouting(List.of())
+            .build();
+
+        Metadata expectedMetadata = Metadata.builder()
+            .clusterUUID("cluster-uuid")
+            .coordinationMetadata(CoordinationMetadata.builder().term(1L).build())
+            .version(13)
+            .persistentSettings(Settings.builder().put("readonly", true).build())
+            .build();
+        mockBlobContainerForGlobalMetadata(mockBlobStoreObjects(), expectedManifest, expectedMetadata);
+
+        ClusterState newClusterState = remoteClusterStateService.getLatestClusterState(
+            clusterState.getClusterName().value(),
+            clusterState.metadata().clusterUUID(),
+            true
+        );
+        remoteClusterStateService.getLatestClusterState(clusterState.getClusterName().value(), clusterState.metadata().clusterUUID(), true);
+        ClusterState stateFromCache = remoteClusterStateService.getRemoteClusterStateCache()
+            .getState(clusterState.getClusterName().value(), expectedManifest);
+        assertTrue(Metadata.isGlobalStateEquals(stateFromCache.getMetadata(), expectedMetadata));
+    }
+
     public void testReadLatestMetadataManifestSuccessButIndexMetadataFetchIOException() throws IOException {
         final ClusterState clusterState = generateClusterStateWithOneIndex().nodes(nodesWithLocalNodeClusterManager()).build();
         final UploadedIndexMetadata uploadedIndexMetadata = new UploadedIndexMetadata("test-index", "index-uuid", "metadata-filename__2");
@@ -2392,8 +2438,9 @@ public class RemoteClusterStateServiceTests extends OpenSearchTestCase {
     }
 
     public void testReadGlobalMetadata() throws IOException {
-        when(blobStoreRepository.getNamedXContentRegistry()).thenReturn(new NamedXContentRegistry(
-            List.of(new NamedXContentRegistry.Entry(Metadata.Custom.class, new ParseField(IndexGraveyard.TYPE), IndexGraveyard::fromXContent))));
+        // when(blobStoreRepository.getNamedXContentRegistry()).thenReturn(new NamedXContentRegistry(
+        // List.of(new NamedXContentRegistry.Entry(Metadata.Custom.class, new ParseField(IndexGraveyard.TYPE),
+        // IndexGraveyard::fromXContent))));
         final ClusterState clusterState = generateClusterStateWithGlobalMetadata().nodes(nodesWithLocalNodeClusterManager()).build();
         remoteClusterStateService.start();
 
@@ -2408,7 +2455,10 @@ public class RemoteClusterStateServiceTests extends OpenSearchTestCase {
             .coordinationMetadata(new ClusterMetadataManifest.UploadedMetadataAttribute(COORDINATION_METADATA, "mock-coordination-file"))
             .settingMetadata(new ClusterMetadataManifest.UploadedMetadataAttribute(SETTING_METADATA, "mock-setting-file"))
             .templatesMetadata(new ClusterMetadataManifest.UploadedMetadataAttribute(TEMPLATES_METADATA, "mock-templates-file"))
-            .put(IndexGraveyard.TYPE, new ClusterMetadataManifest.UploadedMetadataAttribute(IndexGraveyard.TYPE, "mock-custom-" +IndexGraveyard.TYPE+ "-file"))
+            .put(
+                IndexGraveyard.TYPE,
+                new ClusterMetadataManifest.UploadedMetadataAttribute(IndexGraveyard.TYPE, "mock-custom-" + IndexGraveyard.TYPE + "-file")
+            )
             .nodeId("nodeA")
             .opensearchVersion(VersionUtils.randomOpenSearchVersion(random()))
             .previousClusterUUID("prev-cluster-uuid")
@@ -2416,7 +2466,10 @@ public class RemoteClusterStateServiceTests extends OpenSearchTestCase {
             .indicesRouting(List.of())
             .build();
 
-        Metadata expectedMetadata = Metadata.builder().clusterUUID("cluster-uuid").persistentSettings(Settings.builder().put("readonly", true).build()).build();
+        Metadata expectedMetadata = Metadata.builder()
+            .clusterUUID("cluster-uuid")
+            .persistentSettings(Settings.builder().put("readonly", true).build())
+            .build();
         mockBlobContainerForGlobalMetadata(mockBlobStoreObjects(), expectedManifest, expectedMetadata);
 
         ClusterState newClusterState = remoteClusterStateService.getLatestClusterState(
