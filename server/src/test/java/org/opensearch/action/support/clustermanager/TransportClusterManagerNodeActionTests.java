@@ -92,6 +92,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.mockito.Mockito;
 
 import static org.opensearch.index.remote.RemoteMigrationIndexMetadataUpdaterTests.createIndexMetadataWithRemoteStoreSettings;
+import static org.opensearch.node.remotestore.RemoteStoreNodeAttribute.REMOTE_STORE_CLUSTER_STATE_REPOSITORY_NAME_ATTRIBUTE_KEY;
+import static org.opensearch.node.remotestore.RemoteStoreNodeAttribute.REMOTE_STORE_ROUTING_TABLE_REPOSITORY_NAME_ATTRIBUTE_KEY;
 import static org.opensearch.node.remotestore.RemoteStoreNodeAttribute.REMOTE_STORE_SEGMENT_REPOSITORY_NAME_ATTRIBUTE_KEY;
 import static org.opensearch.node.remotestore.RemoteStoreNodeAttribute.REMOTE_STORE_TRANSLOG_REPOSITORY_NAME_ATTRIBUTE_KEY;
 import static org.opensearch.node.remotestore.RemoteStoreNodeService.REMOTE_STORE_COMPATIBILITY_MODE_SETTING;
@@ -271,7 +273,7 @@ public class TransportClusterManagerNodeActionTests extends OpenSearchTestCase {
             return null; // default implementation, overridden in specific tests
         }
 
-        public boolean isLocalExecuteSupported() {
+        public boolean localExecuteSupportedByAction() {
             return localExecuteSupported;
         }
     }
@@ -743,6 +745,26 @@ public class TransportClusterManagerNodeActionTests extends OpenSearchTestCase {
     }
 
     public void testFetchFromRemoteStore() throws InterruptedException, BrokenBarrierException, ExecutionException, IOException {
+        Map<String, String> attributes = new HashMap<>();
+        attributes.put(REMOTE_STORE_CLUSTER_STATE_REPOSITORY_NAME_ATTRIBUTE_KEY, "repo1");
+        attributes.put(REMOTE_STORE_ROUTING_TABLE_REPOSITORY_NAME_ATTRIBUTE_KEY, "repo2");
+
+        localNode = new DiscoveryNode(
+            "local_node",
+            buildNewFakeTransportAddress(),
+            attributes,
+            Collections.singleton(DiscoveryNodeRole.CLUSTER_MANAGER_ROLE),
+            Version.CURRENT
+        );
+        remoteNode = new DiscoveryNode(
+            "remote_node",
+            buildNewFakeTransportAddress(),
+            attributes,
+            Collections.singleton(DiscoveryNodeRole.CLUSTER_MANAGER_ROLE),
+            Version.CURRENT
+        );
+        allNodes = new DiscoveryNode[] { localNode, remoteNode };
+
         setState(clusterService, ClusterStateCreationUtils.state(localNode, remoteNode, allNodes));
 
         ClusterState state = clusterService.state();
@@ -751,7 +773,9 @@ public class TransportClusterManagerNodeActionTests extends OpenSearchTestCase {
             .clusterTerm(state.term() + 1)
             .stateVersion(state.version() + 1)
             .build();
-        when(remoteClusterStateService.getClusterMetadataManifestByFileName(eq(state.stateUUID()), any())).thenReturn(manifest);
+        when(remoteClusterStateService.getClusterMetadataManifestByFileName(eq(state.metadata().clusterUUID()), any())).thenReturn(
+            manifest
+        );
         when(remoteClusterStateService.getClusterStateForManifest(state.getClusterName().value(), manifest, localNode.getId(), true))
             .thenReturn(buildClusterState(state, state.term() + 1, state.version() + 1));
 
@@ -763,7 +787,8 @@ public class TransportClusterManagerNodeActionTests extends OpenSearchTestCase {
         CapturingTransport.CapturedRequest capturedRequest = transport.capturedRequests()[0];
         // mismatch term and version
         GetTermVersionResponse termResp = new GetTermVersionResponse(
-            new ClusterStateTermVersion(state.getClusterName(), state.metadata().clusterUUID(), state.term() + 1, state.version() + 1)
+            new ClusterStateTermVersion(state.getClusterName(), state.metadata().clusterUUID(), state.term() + 1, state.version() + 1),
+            "remote-manifest-file"
         );
         transport.handleResponse(capturedRequest.requestId, termResp);
         // no more transport calls

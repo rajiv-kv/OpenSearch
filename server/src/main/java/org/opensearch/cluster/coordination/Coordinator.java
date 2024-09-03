@@ -1864,4 +1864,11 @@ public class Coordinator extends AbstractLifecycleComponent implements Discovery
     public static boolean isZen1Node(DiscoveryNode discoveryNode) {
         return Booleans.isTrue(discoveryNode.getAttributes().getOrDefault("zen1", "false"));
     }
+
+    public boolean isRemotePublicationEnabled() {
+        if (coordinationState.get() != null) {
+            return coordinationState.get().isRemotePublicationEnabled();
+        }
+        return false;
+    }
 }

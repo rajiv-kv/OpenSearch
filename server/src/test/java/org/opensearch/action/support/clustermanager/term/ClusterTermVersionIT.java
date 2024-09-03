@@ -22,6 +22,7 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.action.ActionFuture;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
+import org.opensearch.common.util.FeatureFlags;
 import org.opensearch.index.mapper.MapperService;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.OpenSearchIntegTestCase;
@@ -31,7 +32,6 @@ import org.opensearch.transport.TransportService;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -112,7 +112,10 @@ public class ClusterTermVersionIT extends OpenSearchIntegTestCase {
     }
 
     public void testDatanodeWithSlowClusterApplierFallbackToPublish() throws Exception {
-        List<String> masters = internalCluster().startClusterManagerOnlyNodes(3);
+        List<String> masters = internalCluster().startClusterManagerOnlyNodes(
+            3,
+            Settings.builder().put(FeatureFlags.TERM_VERSION_PRECOMMIT_ENABLE, "true").build()
+        );
         List<String> datas = internalCluster().startDataOnlyNodes(3);
 
         Map<String, AtomicInteger> callCounters = Map.ofEntries(
@@ -182,7 +185,7 @@ public class ClusterTermVersionIT extends OpenSearchIntegTestCase {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-        }, 100, TimeUnit.SECONDS);
+        });
 
         addCallCountInterceptor(master, callCounters);
         ClusterStateResponse stateResponseD = internalCluster().getInstance(Client.class, datas.get(0))

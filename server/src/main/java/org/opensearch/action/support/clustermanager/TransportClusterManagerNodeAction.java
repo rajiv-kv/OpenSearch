@@ -66,7 +66,6 @@ import org.opensearch.core.common.io.stream.Writeable;
 import org.opensearch.discovery.ClusterManagerNotDiscoveredException;
 import org.opensearch.gateway.remote.ClusterMetadataManifest;
 import org.opensearch.gateway.remote.RemoteClusterStateService;
-import org.opensearch.gateway.remote.RemoteManifestManager;
 import org.opensearch.node.NodeClosedException;
 import org.opensearch.ratelimitting.admissioncontrol.enums.AdmissionControlActionType;
 import org.opensearch.tasks.Task;
@@ -385,7 +384,7 @@ public abstract class TransportClusterManagerNodeAction<Request extends ClusterM
                                 isLatestClusterStatePresentOnLocalNode
                             );
 
-                            ClusterState stateFromNode = getStateFromLocalNode(response.getClusterStateTermVersion());
+                            ClusterState stateFromNode = getStateFromLocalNode(response);
                             if (stateFromNode != null) {
                                 onLatestLocalState.accept(stateFromNode);
                             } else {
@@ -414,7 +413,8 @@ public abstract class TransportClusterManagerNodeAction<Request extends ClusterM
             };
         }
 
-        public ClusterState getStateFromLocalNode(ClusterStateTermVersion termVersion) {
+        private ClusterState getStateFromLocalNode(GetTermVersionResponse termVersionResponse) {
+            ClusterStateTermVersion termVersion = termVersionResponse.getClusterStateTermVersion();
             ClusterState appliedState = clusterService.state();
             if (termVersion.equals(new ClusterStateTermVersion(appliedState))) {
                 logger.trace("Using the applied State from local, ClusterStateTermVersion {}", termVersion);
@@ -427,16 +427,16 @@ public abstract class TransportClusterManagerNodeAction<Request extends ClusterM
                 return preCommitState;
             }
 
-            if (remoteClusterStateService != null) {
+            if (remoteClusterStateService != null && termVersionResponse.getRemoteManifestFile() != null) {
                 try {
-                    String manifestFile = RemoteManifestManager.getManifestFilePrefixForTermVersion(
-                        termVersion.getTerm(),
-                        termVersion.getVersion()
-                    );
                     ClusterMetadataManifest clusterMetadataManifest = remoteClusterStateService.getClusterMetadataManifestByFileName(
                         appliedState.metadata().clusterUUID(),
-                        manifestFile
+                        termVersionResponse.getRemoteManifestFile()
                     );
+                    if (clusterMetadataManifest == null) {
+                        logger.trace("could not find manifest in remote-store for ClusterStateTermVersion {}", termVersion);
+                        return null;
+                    }
                     ClusterState clusterStateFromRemote = remoteClusterStateService.getClusterStateForManifest(
                         appliedState.getClusterName().value(),
                         clusterMetadataManifest,

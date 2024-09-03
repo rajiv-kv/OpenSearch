@@ -1364,9 +1364,8 @@ public class RemoteClusterStateService implements Closeable {
         if (stateFromCache != null) {
             return stateFromCache;
         }
-        ClusterState retState = null;
         if (manifest.onOrAfterCodecVersion(CODEC_V2)) {
-            retState = readClusterStateInParallel(
+            clusterState = readClusterStateInParallel(
                 ClusterState.builder(new ClusterName(clusterName)).build(),
                 manifest,
                 manifest.getClusterUUID(),
@@ -1412,16 +1411,16 @@ public class RemoteClusterStateService implements Closeable {
             );
             Metadata.Builder mb = Metadata.builder(remoteGlobalMetadataManager.getGlobalMetadata(manifest.getClusterUUID(), manifest));
             mb.indices(state.metadata().indices());
-            retState = ClusterState.builder(state).metadata(mb).build();
+            clusterState = ClusterState.builder(state).metadata(mb).build();
         }
         final long durationMillis = TimeValue.nsecToMSec(relativeTimeNanosSupplier.getAsLong() - startTimeNanos);
         remoteStateStats.stateFullDownloadSucceeded();
         remoteStateStats.stateFullDownloadTook(durationMillis);
         if (includeEphemeral) {
             // cache only if the entire cluster-state is present
-            remoteClusterStateCache.putState(retState);
+            remoteClusterStateCache.putState(clusterState);
         }
-        return retState;
+        return clusterState;
     }
 
     public ClusterState getClusterStateUsingDiff(ClusterMetadataManifest manifest, ClusterState previousState, String localNodeId) {
@@ -1886,7 +1885,6 @@ public class RemoteClusterStateService implements Closeable {
         return remoteStateStats;
     }
 
-<<<<<<< HEAD
     public PersistedStateStats getUploadStats() {
         return remoteStateStats.getUploadStats();
     }
@@ -1906,10 +1904,9 @@ public class RemoteClusterStateService implements Closeable {
     public void diffDownloadFailed() {
         remoteStateStats.stateDiffDownloadFailed();
     }
-=======
+
     RemoteClusterStateCache getRemoteClusterStateCache() {
         return remoteClusterStateCache;
     }
 
->>>>>>> f2908f0b666 (using remote cluster-state as fallback)
 }

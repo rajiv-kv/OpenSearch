@@ -2325,50 +2325,50 @@ public class RemoteClusterStateServiceTests extends OpenSearchTestCase {
     }
 
     public void testReadLatestClusterStateFromCache() throws IOException {
-        // when(blobStoreRepository.getNamedXContentRegistry()).thenReturn(new NamedXContentRegistry(
-        // List.of(new NamedXContentRegistry.Entry(Metadata.Custom.class, new ParseField(IndexGraveyard.TYPE),
-        // IndexGraveyard::fromXContent))));
-        final ClusterState clusterState = generateClusterStateWithGlobalMetadata().nodes(nodesWithLocalNodeClusterManager()).build();
+        final ClusterState clusterState = generateClusterStateWithOneIndex().nodes(nodesWithLocalNodeClusterManager()).build();
         remoteClusterStateService.start();
 
+        final Index index = new Index("test-index", "index-uuid");
+        String fileName = "metadata-" + index.getUUID() + "__1";
+        final UploadedIndexMetadata uploadedIndexMetadata = new UploadedIndexMetadata(index.getName(), index.getUUID(), fileName);
+        final Settings idxSettings = Settings.builder()
+            .put(IndexMetadata.SETTING_VERSION_CREATED, Version.CURRENT)
+            .put(IndexMetadata.SETTING_INDEX_UUID, index.getUUID())
+            .build();
+        final IndexMetadata indexMetadata = new IndexMetadata.Builder(index.getName()).settings(idxSettings)
+            .numberOfShards(11)
+            .numberOfReplicas(10)
+            .build();
+
+        final List<UploadedIndexMetadata> indices = List.of(uploadedIndexMetadata);
         final ClusterMetadataManifest expectedManifest = ClusterMetadataManifest.builder()
-            .indices(List.of())
-            .clusterTerm(1L)
-            .stateVersion(13)
+            .indices(indices)
+            .clusterTerm(0L)
+            .stateVersion(0L)
             .stateUUID("state-uuid")
             .clusterUUID("cluster-uuid")
-            .codecVersion(MANIFEST_CURRENT_CODEC_VERSION)
-            .coordinationMetadata(new ClusterMetadataManifest.UploadedMetadataAttribute(COORDINATION_METADATA, "mock-coordination-file"))
-            .settingMetadata(new ClusterMetadataManifest.UploadedMetadataAttribute(SETTING_METADATA, "mock-setting-file"))
-            .templatesMetadata(new ClusterMetadataManifest.UploadedMetadataAttribute(TEMPLATES_METADATA, "mock-templates-file"))
-            .put(
-                IndexGraveyard.TYPE,
-                new ClusterMetadataManifest.UploadedMetadataAttribute(IndexGraveyard.TYPE, "mock-custom-" + IndexGraveyard.TYPE + "-file")
-            )
             .nodeId("nodeA")
             .opensearchVersion(VersionUtils.randomOpenSearchVersion(random()))
             .previousClusterUUID("prev-cluster-uuid")
-            .routingTableVersion(1)
-            .indicesRouting(List.of())
+            .codecVersion(CODEC_V2)
             .build();
 
-        Metadata expectedMetadata = Metadata.builder()
-            .clusterUUID("cluster-uuid")
-            .coordinationMetadata(CoordinationMetadata.builder().term(1L).build())
-            .version(13)
-            .persistentSettings(Settings.builder().put("readonly", true).build())
-            .build();
-        mockBlobContainerForGlobalMetadata(mockBlobStoreObjects(), expectedManifest, expectedMetadata);
+        mockBlobContainer(mockBlobStoreObjects(), expectedManifest, Map.of(index.getUUID(), indexMetadata), CODEC_V2);
 
-        ClusterState newClusterState = remoteClusterStateService.getLatestClusterState(
+        Map<String, IndexMetadata> indexMetadataMap = remoteClusterStateService.getLatestClusterState(
             clusterState.getClusterName().value(),
             clusterState.metadata().clusterUUID(),
             true
-        );
-        remoteClusterStateService.getLatestClusterState(clusterState.getClusterName().value(), clusterState.metadata().clusterUUID(), true);
+        ).getMetadata().getIndices();
+
+        assertEquals(indexMetadataMap.size(), 1);
+        assertEquals(indexMetadataMap.get(index.getName()).getIndex().getName(), index.getName());
+        assertEquals(indexMetadataMap.get(index.getName()).getNumberOfShards(), indexMetadata.getNumberOfShards());
+        assertEquals(indexMetadataMap.get(index.getName()).getNumberOfReplicas(), indexMetadata.getNumberOfReplicas());
+
         ClusterState stateFromCache = remoteClusterStateService.getRemoteClusterStateCache()
             .getState(clusterState.getClusterName().value(), expectedManifest);
-        assertTrue(Metadata.isGlobalStateEquals(stateFromCache.getMetadata(), expectedMetadata));
+        assertEquals(stateFromCache.getMetadata().getIndices(), indexMetadataMap);
     }
 
     public void testReadLatestMetadataManifestSuccessButIndexMetadataFetchIOException() throws IOException {
