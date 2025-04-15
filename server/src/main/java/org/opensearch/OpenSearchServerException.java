@@ -8,6 +8,9 @@
 
 package org.opensearch;
 
+import org.opensearch.common.settings.NoClassSettingsException;
+import org.opensearch.common.settings.SettingsException;
+
 import static org.opensearch.OpenSearchException.OpenSearchExceptionHandle;
 import static org.opensearch.OpenSearchException.OpenSearchExceptionHandleRegistry.registerExceptionHandle;
 import static org.opensearch.OpenSearchException.UNKNOWN_VERSION_ADDED;
@@ -423,8 +426,8 @@ public final class OpenSearchServerException {
         );
         registerExceptionHandle(
             new OpenSearchExceptionHandle(
-                org.opensearch.common.settings.SettingsException.class,
-                org.opensearch.common.settings.SettingsException::new,
+                SettingsException.class,
+                SettingsException::new,
                 56,
                 UNKNOWN_VERSION_ADDED
             )
@@ -768,8 +771,8 @@ public final class OpenSearchServerException {
         // 110 used to be FlushNotAllowedEngineException
         registerExceptionHandle(
             new OpenSearchExceptionHandle(
-                org.opensearch.common.settings.NoClassSettingsException.class,
-                org.opensearch.common.settings.NoClassSettingsException::new,
+                NoClassSettingsException.class,
+                NoClassSettingsException::new,
                 111,
                 UNKNOWN_VERSION_ADDED
             )

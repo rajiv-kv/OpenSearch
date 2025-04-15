@@ -256,7 +256,7 @@ public class AliasMetadata extends AbstractDiffable<AliasMetadata> implements To
     }
 
     public static Diff<AliasMetadata> readDiffFrom(StreamInput in) throws IOException {
-        return readDiffFrom(AliasMetadata::new, in);
+        return AbstractDiffable.readDiffFrom(AliasMetadata::new, in);
     }
 
     @Override

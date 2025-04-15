@@ -1767,7 +1767,7 @@ public class SettingTests extends OpenSearchTestCase {
         assertThat(e.getMessage(), containsString("must be stored inside opensearch.yml"));
     }
 
-    @TestLogging(value = "org.opensearch.common.settings.IndexScopedSettings:INFO", reason = "to ensure we log INFO-level messages from IndexScopedSettings")
+    @TestLogging(value = "org.opensearch.common.settings.settings.IndexScopedSettings:INFO", reason = "to ensure we log INFO-level messages from IndexScopedSettings")
     public void testLogSettingUpdate() throws Exception {
         final IndexMetadata metadata = newIndexMeta(
             "index1",
@@ -1780,7 +1780,7 @@ public class SettingTests extends OpenSearchTestCase {
             mockLogAppender.addExpectation(
                 new MockLogAppender.SeenEventExpectation(
                     "message",
-                    "org.opensearch.common.settings.IndexScopedSettings",
+                    "org.opensearch.common.settings.settings.IndexScopedSettings",
                     Level.INFO,
                     "updating [index.refresh_interval] from [20s] to [10s]"
                 ) {

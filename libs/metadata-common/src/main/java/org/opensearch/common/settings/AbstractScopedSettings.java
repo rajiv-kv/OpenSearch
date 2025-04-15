@@ -35,11 +35,11 @@ package org.opensearch.common.settings;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
-import org.apache.lucene.search.spell.LevenshteinDistance;
 import org.apache.lucene.util.CollectionUtil;
 import org.opensearch.ExceptionsHelper;
 import org.opensearch.common.collect.Tuple;
 import org.opensearch.common.regex.Regex;
+//import org.apache.commons.text.similarity.LevenshteinDistance;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -238,9 +238,6 @@ public abstract class AbstractScopedSettings {
 
     /**
      * Adds a settings consumer with a predicate that is only evaluated at update time.
-     * <p>
-     * Note: Only settings registered in {@link SettingsModule} can be changed dynamically.
-     * </p>
      * @param validator an additional validator that is only applied to updates of this setting.
      *                  This is useful to add additional validation to settings at runtime compared to at startup time.
      */
@@ -292,9 +289,6 @@ public abstract class AbstractScopedSettings {
     /**
      * Adds a affix settings consumer that accepts the values for two settings. The consumer is only notified if one or both settings change
      * and if the provided validator succeeded.
-     * <p>
-     * Note: Only settings registered in {@link SettingsModule} can be changed dynamically.
-     * </p>
      * This method registers a compound updater that is useful if two settings are depending on each other.
      * The consumer is always provided with both values even if only one of the two changes.
      */
@@ -361,9 +355,6 @@ public abstract class AbstractScopedSettings {
     /**
      * Adds a affix settings consumer that accepts the settings for a group of settings. The consumer is only
      * notified if at least one of the settings change.
-     * <p>
-     * Note: Only settings registered in {@link SettingsModule} can be changed dynamically.
-     * </p>
      */
     public synchronized void addAffixGroupUpdateConsumer(List<Setting.AffixSetting<?>> settings, BiConsumer<String, Settings> consumer) {
         List<SettingUpdater> affixUpdaters = new ArrayList<>(settings.size());
@@ -445,9 +436,6 @@ public abstract class AbstractScopedSettings {
     /**
      * Adds a settings consumer that accepts the values for two settings. The consumer is only notified if one or both settings change
      * and if the provided validator succeeded.
-     * <p>
-     * Note: Only settings registered in {@link SettingsModule} can be changed dynamically.
-     * </p>
      * This method registers a compound updater that is useful if two settings are depending on each other.
      * The consumer is always provided with both values even if only one of the two changes.
      */
@@ -468,9 +456,6 @@ public abstract class AbstractScopedSettings {
 
     /**
      * Adds a settings consumer.
-     * <p>
-     * Note: Only settings registered in {@link org.opensearch.cluster.ClusterModule} can be changed dynamically.
-     * </p>
      */
     public synchronized <T> void addSettingsUpdateConsumer(Setting<T> setting, Consumer<T> consumer) {
         addSettingsUpdateConsumer(setting, consumer, (s) -> {});
@@ -581,10 +566,10 @@ public abstract class AbstractScopedSettings {
     ) {
         Setting setting = getRaw(key);
         if (setting == null) {
-            LevenshteinDistance ld = new LevenshteinDistance();
+          //  LevenshteinDistance ld = new LevenshteinDistance();
             List<Tuple<Float, String>> scoredKeys = new ArrayList<>();
             for (String k : this.keySettings.keySet()) {
-                float distance = ld.getDistance(key, k);
+                float distance = 0; //ld.getDistance(key, k);
                 if (distance > 0.7f) {
                     scoredKeys.add(new Tuple<>(distance, k));
                 }

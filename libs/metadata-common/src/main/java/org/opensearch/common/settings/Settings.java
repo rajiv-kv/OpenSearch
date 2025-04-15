@@ -39,13 +39,13 @@ import org.opensearch.Version;
 import org.opensearch.common.Booleans;
 import org.opensearch.common.SetOnce;
 import org.opensearch.common.annotation.PublicApi;
-import org.opensearch.common.logging.DeprecationLogger;
-import org.opensearch.common.logging.LogConfigurator;
-import org.opensearch.common.unit.MemorySizeValue;
+//import org.opensearch.common.logging.DeprecationLogger;
+//import org.opensearch.common.logging.LogConfigurator;
+//import org.opensearch.common.unit.MemorySizeValue;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.util.io.IOUtils;
-import org.opensearch.common.xcontent.LoggingDeprecationHandler;
-import org.opensearch.common.xcontent.XContentType;
+//import org.opensearch.common.xcontent.LoggingDeprecationHandler;
+//import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.common.Strings;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
@@ -343,14 +343,12 @@ public final class Settings implements ToXContentFragment {
     }
 
     /**
-     * We have to lazy initialize the deprecation logger as otherwise a static logger here would be constructed before logging is configured
-     * leading to a runtime failure (see {@link LogConfigurator#checkErrorListener()} ). The premature construction would come from any
-     * {@link Setting} object constructed in, for example, {@link org.opensearch.env.Environment}.
-     *
+//     * We have to lazy initialize the deprecation logger as otherwise a static logger here would be constructed before logging is configured
+//     *
      * @opensearch.internal
      */
     static class DeprecationLoggerHolder {
-        static DeprecationLogger deprecationLogger = DeprecationLogger.getLogger(Settings.class);
+        //static DeprecationLogger deprecationLogger = DeprecationLogger.getLogger(Settings.class);
     }
 
     /**
@@ -383,7 +381,7 @@ public final class Settings implements ToXContentFragment {
      * (eg. 12%). If it does not exists, parses the default value provided.
      */
     public ByteSizeValue getAsMemory(String setting, String defaultValue) throws SettingsException {
-        return MemorySizeValue.parseBytesSizeValueOrHeapRatio(get(setting, defaultValue), setting);
+        return parseBytesSizeValue(get(setting, defaultValue), setting);//MemorySizeValue.parseBytesSizeValueOrHeapRatio(get(setting, defaultValue), setting);
     }
 
     /**
@@ -1100,7 +1098,7 @@ public final class Settings implements ToXContentFragment {
         public Builder loadFromSource(String source, MediaType mediaType) {
             try (
                 XContentParser parser = mediaType.xContent()
-                    .createParser(NamedXContentRegistry.EMPTY, LoggingDeprecationHandler.INSTANCE, source)
+                    .createParser(NamedXContentRegistry.EMPTY, null, source)
             ) {
                 this.put(fromXContent(parser, true, true));
             } catch (Exception e) {
@@ -1126,7 +1124,7 @@ public final class Settings implements ToXContentFragment {
             if (resourceName.endsWith(".json")) {
                 mediaType = MediaTypeRegistry.JSON;
             } else if (resourceName.endsWith(".yml") || resourceName.endsWith(".yaml")) {
-                mediaType = XContentType.YAML;
+                mediaType = MediaType.fromMediaType("YAML");
             } else {
                 throw new IllegalArgumentException("unable to detect content type from resource name [" + resourceName + "]");
             }
@@ -1238,7 +1236,7 @@ public final class Settings implements ToXContentFragment {
             while (iterator.hasNext()) {
                 Map.Entry<String, Object> entry = iterator.next();
                 String key = entry.getKey();
-                if (key.startsWith(prefix) == false && key.endsWith("*") == false && key.startsWith(ARCHIVED_SETTINGS_PREFIX) == false) {
+                if (key.startsWith(prefix) == false && key.endsWith("*") == false && key.startsWith(AbstractScopedSettings.ARCHIVED_SETTINGS_PREFIX) == false) {
                     replacements.put(prefix + key, entry.getValue());
                     iterator.remove();
                 }

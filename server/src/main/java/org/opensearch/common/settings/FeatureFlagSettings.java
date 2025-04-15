@@ -8,7 +8,6 @@
 
 package org.opensearch.common.settings;
 
-import org.opensearch.common.settings.Setting.Property;
 import org.opensearch.common.util.FeatureFlags;
 
 import java.util.Set;
@@ -24,7 +23,7 @@ public class FeatureFlagSettings extends AbstractScopedSettings {
         Settings settings,
         Set<Setting<?>> settingsSet,
         Set<SettingUpgrader<?>> settingUpgraders,
-        Property scope
+        Setting.Property scope
     ) {
         super(settings, settingsSet, settingUpgraders, scope);
     }

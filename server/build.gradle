@@ -69,9 +69,11 @@ dependencies {
   api project(":libs:opensearch-geo")
   api project(":libs:opensearch-telemetry")
   api project(":libs:opensearch-task-commons")
+  api project(":libs:opensearch-metadata-common")
+    implementation project(path: ':libs:opensearch-metadata-common')
 
 
-  compileOnly project(':libs:opensearch-plugin-classloader')
+    compileOnly project(':libs:opensearch-plugin-classloader')
   testRuntimeOnly project(':libs:opensearch-plugin-classloader')
 
   api libs.bundles.lucene

@@ -91,7 +91,6 @@ import org.opensearch.common.cache.store.settings.OpenSearchOnHeapCacheSettings;
 import org.opensearch.common.logging.Loggers;
 import org.opensearch.common.network.NetworkModule;
 import org.opensearch.common.network.NetworkService;
-import org.opensearch.common.settings.Setting.Property;
 import org.opensearch.common.util.FeatureFlags;
 import org.opensearch.common.util.PageCacheRecycler;
 import org.opensearch.common.util.concurrent.OpenSearchExecutors;
@@ -109,7 +108,9 @@ import org.opensearch.gateway.PersistedClusterStateService;
 import org.opensearch.gateway.ShardsBatchGatewayAllocator;
 import org.opensearch.gateway.remote.RemoteClusterStateCleanupManager;
 import org.opensearch.gateway.remote.RemoteClusterStateService;
+import org.opensearch.gateway.remote.RemoteGlobalMetadataManager;
 import org.opensearch.gateway.remote.RemoteIndexMetadataManager;
+import org.opensearch.gateway.remote.RemoteManifestManager;
 import org.opensearch.gateway.remote.model.RemoteRoutingTableBlobStore;
 import org.opensearch.http.HttpTransportSettings;
 import org.opensearch.index.IndexModule;
@@ -205,7 +206,7 @@ public final class ClusterSettings extends AbstractScopedSettings {
     }
 
     public ClusterSettings(final Settings nodeSettings, final Set<Setting<?>> settingsSet, final Set<SettingUpgrader<?>> settingUpgraders) {
-        super(nodeSettings, settingsSet, settingUpgraders, Property.NodeScope);
+        super(nodeSettings, settingsSet, settingUpgraders, Setting.Property.NodeScope);
         addSettingsUpdater(new LoggingSettingUpdater(nodeSettings));
     }
 
@@ -741,8 +742,8 @@ public final class ClusterSettings extends AbstractScopedSettings {
                 RemoteClusterStateService.REMOTE_STATE_DOWNLOAD_TO_SERVE_READ_API,
 
                 INDEX_METADATA_UPLOAD_TIMEOUT_SETTING,
-                GLOBAL_METADATA_UPLOAD_TIMEOUT_SETTING,
-                METADATA_MANIFEST_UPLOAD_TIMEOUT_SETTING,
+                RemoteGlobalMetadataManager.GLOBAL_METADATA_UPLOAD_TIMEOUT_SETTING,
+                RemoteManifestManager.METADATA_MANIFEST_UPLOAD_TIMEOUT_SETTING,
                 RemoteClusterStateService.REMOTE_STATE_READ_TIMEOUT_SETTING,
                 RemoteClusterStateService.CLUSTER_REMOTE_STORE_STATE_PATH_PREFIX,
                 RemoteIndexMetadataManager.REMOTE_INDEX_METADATA_PATH_TYPE_SETTING,

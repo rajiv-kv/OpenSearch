@@ -53,7 +53,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
- * A module that binds the provided settings to the {@link Settings} interface.
+ * A module that binds the provided settings to the {@link org.opensearch.common.settings.Settings} interface.
  *
  * @opensearch.internal
  */

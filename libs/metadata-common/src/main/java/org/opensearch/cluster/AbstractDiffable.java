@@ -35,6 +35,7 @@ package org.opensearch.cluster;
 import org.opensearch.common.Nullable;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
+import org.opensearch.core.common.io.stream.Writeable;
 
 import java.io.IOException;
 
@@ -59,7 +60,7 @@ public abstract class AbstractDiffable<T extends Diffable<T>> implements Diffabl
     }
 
     @SuppressWarnings("unchecked")
-    public static <T extends Diffable<T>> Diff<T> readDiffFrom(Reader<T> reader, StreamInput in) throws IOException {
+    public static <T extends Diffable<T>> Diff<T> readDiffFrom(Writeable.Reader<T> reader, StreamInput in) throws IOException {
         if (in.readBoolean()) {
             return new CompleteDiff<>(reader.read(in));
         }

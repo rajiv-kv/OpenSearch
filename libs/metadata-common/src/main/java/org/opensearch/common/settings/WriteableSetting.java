@@ -10,16 +10,6 @@ package org.opensearch.common.settings;
 
 import org.opensearch.Version;
 import org.opensearch.common.Nullable;
-import org.opensearch.common.settings.Setting.ByteSizeValueParser;
-import org.opensearch.common.settings.Setting.DoubleParser;
-import org.opensearch.common.settings.Setting.FloatParser;
-import org.opensearch.common.settings.Setting.IntegerParser;
-import org.opensearch.common.settings.Setting.LongParser;
-import org.opensearch.common.settings.Setting.MemorySizeValueParser;
-import org.opensearch.common.settings.Setting.MinMaxTimeValueParser;
-import org.opensearch.common.settings.Setting.MinTimeValueParser;
-import org.opensearch.common.settings.Setting.Property;
-import org.opensearch.common.settings.Setting.RegexValidator;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
@@ -109,9 +99,9 @@ public class WriteableSetting implements Writeable {
             validator = readValidator(in);
         }
         // Read properties
-        EnumSet<Property> propSet = in.readEnumSet(Property.class);
+        EnumSet<Setting.Property> propSet = in.readEnumSet(Setting.Property.class);
         // Put it all in a setting object
-        this.setting = createSetting(type, key, defaultValue, parser, validator, fallback, propSet.toArray(Property[]::new));
+        this.setting = createSetting(type, key, defaultValue, parser, validator, fallback, propSet.toArray(Setting.Property[]::new));
     }
 
     /**
@@ -162,7 +152,7 @@ public class WriteableSetting implements Writeable {
         @Nullable Object parser,
         Object validator,
         WriteableSetting fallback,
-        Property[] propertyArray
+        Setting.Property[] propertyArray
     ) {
         switch (type) {
             case Boolean:
@@ -174,8 +164,8 @@ public class WriteableSetting implements Writeable {
                     return Setting.intSetting(
                         key,
                         (int) defaultValue,
-                        ((IntegerParser) parser).getMin(),
-                        ((IntegerParser) parser).getMax(),
+                        ((Setting.IntegerParser) parser).getMin(),
+                        ((Setting.IntegerParser) parser).getMax(),
                         propertyArray
                     );
                 } else if (fallback == null) {
@@ -187,8 +177,8 @@ public class WriteableSetting implements Writeable {
                     return Setting.longSetting(
                         key,
                         (long) defaultValue,
-                        ((LongParser) parser).getMin(),
-                        ((LongParser) parser).getMax(),
+                        ((Setting.LongParser) parser).getMin(),
+                        ((Setting.LongParser) parser).getMax(),
                         propertyArray
                     );
                 } else if (fallback == null) {
@@ -200,8 +190,8 @@ public class WriteableSetting implements Writeable {
                     return Setting.floatSetting(
                         key,
                         (float) defaultValue,
-                        ((FloatParser) parser).getMin(),
-                        ((FloatParser) parser).getMax(),
+                        ((Setting.FloatParser) parser).getMin(),
+                        ((Setting.FloatParser) parser).getMax(),
                         propertyArray
                     );
                 } else if (fallback == null) {
@@ -213,8 +203,8 @@ public class WriteableSetting implements Writeable {
                     return Setting.doubleSetting(
                         key,
                         (double) defaultValue,
-                        ((DoubleParser) parser).getMin(),
-                        ((DoubleParser) parser).getMax(),
+                        ((Setting.DoubleParser) parser).getMin(),
+                        ((Setting.DoubleParser) parser).getMax(),
                         propertyArray
                     );
                 } else if (fallback == null) {
@@ -227,16 +217,16 @@ public class WriteableSetting implements Writeable {
                     : Setting.simpleString(key, (Setting<String>) fallback.getSetting(), propertyArray);
             case TimeValue:
                 if (fallback == null && parser instanceof Writeable) {
-                    if (parser instanceof MinMaxTimeValueParser) {
+                    if (parser instanceof Setting.MinMaxTimeValueParser) {
                         return Setting.timeSetting(
                             key,
                             (TimeValue) defaultValue,
-                            ((MinMaxTimeValueParser) parser).getMin(),
-                            ((MinMaxTimeValueParser) parser).getMax(),
+                            ((Setting.MinMaxTimeValueParser) parser).getMin(),
+                            ((Setting.MinMaxTimeValueParser) parser).getMax(),
                             propertyArray
                         );
                     } else {
-                        return Setting.timeSetting(key, (TimeValue) defaultValue, ((MinTimeValueParser) parser).getMin(), propertyArray);
+                        return Setting.timeSetting(key, (TimeValue) defaultValue, ((Setting.MinTimeValueParser) parser).getMin(), propertyArray);
                     }
                 } else if (fallback == null) {
                     return Setting.timeSetting(key, (TimeValue) defaultValue, propertyArray);
@@ -244,10 +234,10 @@ public class WriteableSetting implements Writeable {
                 return Setting.timeSetting(key, (Setting<TimeValue>) fallback.getSetting(), propertyArray);
             case ByteSizeValue:
                 if (fallback == null && parser instanceof Writeable) {
-                    if (parser instanceof MemorySizeValueParser) {
+                    if (parser instanceof Setting.MemorySizeValueParser) {
                         return Setting.memorySizeSetting(key, (ByteSizeValue) defaultValue, propertyArray);
                     } else {
-                        ByteSizeValueParser byteSizeValueParser = (ByteSizeValueParser) parser;
+                        Setting.ByteSizeValueParser byteSizeValueParser = (Setting.ByteSizeValueParser) parser;
                         return Setting.byteSizeSetting(
                             key,
                             (ByteSizeValue) defaultValue,
@@ -302,33 +292,33 @@ public class WriteableSetting implements Writeable {
     private void writeParser(StreamOutput out, Object parser) throws IOException {
         switch (type) {
             case Integer:
-                ((IntegerParser) parser).writeTo(out);
+                ((Setting.IntegerParser) parser).writeTo(out);
                 break;
             case Long:
-                ((LongParser) parser).writeTo(out);
+                ((Setting.LongParser) parser).writeTo(out);
                 break;
             case Float:
-                ((FloatParser) parser).writeTo(out);
+                ((Setting.FloatParser) parser).writeTo(out);
                 break;
             case Double:
-                ((DoubleParser) parser).writeTo(out);
+                ((Setting.DoubleParser) parser).writeTo(out);
                 break;
             case TimeValue:
-                if (parser instanceof MinMaxTimeValueParser) {
+                if (parser instanceof Setting.MinMaxTimeValueParser) {
                     out.writeBoolean(true);
-                    ((MinMaxTimeValueParser) parser).writeTo(out);
-                } else if (parser instanceof MinTimeValueParser) {
+                    ((Setting.MinMaxTimeValueParser) parser).writeTo(out);
+                } else if (parser instanceof Setting.MinTimeValueParser) {
                     out.writeBoolean(false);
-                    ((MinTimeValueParser) parser).writeTo(out);
+                    ((Setting.MinTimeValueParser) parser).writeTo(out);
                 }
                 break;
             case ByteSizeValue:
-                if (parser instanceof ByteSizeValueParser) {
+                if (parser instanceof Setting.ByteSizeValueParser) {
                     out.writeBoolean(true);
-                    ((ByteSizeValueParser) parser).writeTo(out);
-                } else if (parser instanceof MemorySizeValueParser) {
+                    ((Setting.ByteSizeValueParser) parser).writeTo(out);
+                } else if (parser instanceof Setting.MemorySizeValueParser) {
                     out.writeBoolean(false);
-                    ((MemorySizeValueParser) parser).writeTo(out);
+                    ((Setting.MemorySizeValueParser) parser).writeTo(out);
                 }
                 break;
             default:
@@ -380,24 +370,24 @@ public class WriteableSetting implements Writeable {
     private Object readParser(StreamInput in, Object parser) throws IOException {
         switch (type) {
             case Integer:
-                return new IntegerParser(in);
+                return new Setting.IntegerParser(in);
             case Long:
-                return new LongParser(in);
+                return new Setting.LongParser(in);
             case Float:
-                return new FloatParser(in);
+                return new Setting.FloatParser(in);
             case Double:
-                return new DoubleParser(in);
+                return new Setting.DoubleParser(in);
             case TimeValue:
                 if (in.readBoolean()) {
-                    return new MinMaxTimeValueParser(in);
+                    return new Setting.MinMaxTimeValueParser(in);
                 } else {
-                    return new MinTimeValueParser(in);
+                    return new Setting.MinTimeValueParser(in);
                 }
             case ByteSizeValue:
                 if (in.readBoolean()) {
-                    return new ByteSizeValueParser(in);
+                    return new Setting.ByteSizeValueParser(in);
                 } else {
-                    return new MemorySizeValueParser(in);
+                    return new Setting.MemorySizeValueParser(in);
                 }
             default:
                 throw new IllegalArgumentException("A SettingType has been added to the enum and not handled here.");
@@ -405,7 +395,7 @@ public class WriteableSetting implements Writeable {
     }
 
     private Object readValidator(StreamInput in) throws IOException {
-        return new RegexValidator(in);
+        return new Setting.RegexValidator(in);
     }
 
     private Object readDefaultValue(StreamInput in) throws IOException {

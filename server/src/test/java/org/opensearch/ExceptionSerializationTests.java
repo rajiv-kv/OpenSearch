@@ -69,6 +69,8 @@ import org.opensearch.common.breaker.ResponseLimitBreachedException;
 import org.opensearch.common.collect.Tuple;
 import org.opensearch.common.io.PathUtils;
 import org.opensearch.common.io.stream.BytesStreamOutput;
+import org.opensearch.common.settings.NoClassSettingsException;
+import org.opensearch.common.settings.SettingsException;
 import org.opensearch.common.util.CancellableThreadsTests;
 import org.opensearch.common.util.set.Sets;
 import org.opensearch.core.common.ParsingException;
@@ -783,7 +785,7 @@ public class ExceptionSerializationTests extends OpenSearchTestCase {
         ids.put(53, org.opensearch.index.engine.EngineException.class);
         ids.put(54, null); // was DocumentAlreadyExistsException, which is superseded with VersionConflictEngineException
         ids.put(55, org.opensearch.action.NoSuchNodeException.class);
-        ids.put(56, org.opensearch.common.settings.SettingsException.class);
+        ids.put(56, SettingsException.class);
         ids.put(57, org.opensearch.indices.IndexTemplateMissingException.class);
         ids.put(58, org.opensearch.transport.SendRequestTransportException.class);
         ids.put(59, null); // was OpenSearchRejectedExecutionException, which is no longer an instance of OpenSearchException
@@ -835,7 +837,7 @@ public class ExceptionSerializationTests extends OpenSearchTestCase {
         ids.put(108, null);
         ids.put(109, org.opensearch.index.engine.DocumentSourceMissingException.class);
         ids.put(110, null); // FlushNotAllowedEngineException was removed in 5.0
-        ids.put(111, org.opensearch.common.settings.NoClassSettingsException.class);
+        ids.put(111, NoClassSettingsException.class);
         ids.put(112, org.opensearch.transport.BindTransportException.class);
         ids.put(113, org.opensearch.rest.action.admin.indices.AliasesNotFoundException.class);
         ids.put(114, org.opensearch.index.shard.IndexShardRecoveringException.class);

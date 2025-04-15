@@ -40,7 +40,6 @@ import org.opensearch.cluster.routing.allocation.decider.MaxRetryAllocationDecid
 import org.opensearch.cluster.routing.allocation.decider.ShardsLimitAllocationDecider;
 import org.opensearch.common.annotation.PublicApi;
 import org.opensearch.common.logging.Loggers;
-import org.opensearch.common.settings.Setting.Property;
 import org.opensearch.common.util.FeatureFlags;
 import org.opensearch.index.IndexModule;
 import org.opensearch.index.IndexSettings;
@@ -72,7 +71,7 @@ import java.util.function.Predicate;
 
 /**
  * Encapsulates all valid index level settings.
- * @see Property#IndexScope
+ * @see org.opensearch.common.settings.Setting.Property#IndexScope
  *
  * @opensearch.api
  */
@@ -266,8 +265,8 @@ public final class IndexScopedSettings extends AbstractScopedSettings {
                             );
                         }
                     }
-                }, Property.IndexScope), // this allows similarity settings to be passed
-                Setting.groupSetting("index.analysis.", Property.IndexScope) // this allows analysis settings to be passed
+                }, Setting.Property.IndexScope), // this allows similarity settings to be passed
+                Setting.groupSetting("index.analysis.", Setting.Property.IndexScope) // this allows analysis settings to be passed
 
             )
         )
@@ -288,7 +287,7 @@ public final class IndexScopedSettings extends AbstractScopedSettings {
     public static final IndexScopedSettings DEFAULT_SCOPED_SETTINGS = new IndexScopedSettings(Settings.EMPTY, BUILT_IN_INDEX_SETTINGS);
 
     public IndexScopedSettings(Settings settings, Set<Setting<?>> settingsSet) {
-        super(settings, settingsSet, Collections.emptySet(), Property.IndexScope);
+        super(settings, settingsSet, Collections.emptySet(), Setting.Property.IndexScope);
     }
 
     private IndexScopedSettings(Settings settings, IndexScopedSettings other, IndexMetadata metadata) {

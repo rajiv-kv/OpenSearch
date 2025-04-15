@@ -41,7 +41,6 @@ import org.opensearch.common.Nullable;
 import org.opensearch.common.annotation.PublicApi;
 import org.opensearch.common.collect.Tuple;
 import org.opensearch.common.regex.Regex;
-import org.opensearch.common.unit.MemorySizeValue;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.common.Strings;
@@ -80,6 +79,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.opensearch.core.common.unit.ByteSizeValue.parseBytesSizeValue;
+
 /**
  * A setting. Encapsulates typical stuff like default value, parsing, and scope.
  * Some (Settings.Property.Dynamic) can be modified at run time using the API.
@@ -89,7 +90,7 @@ import java.util.stream.Stream;
  * <pre>{@code
  * public static final Setting<Boolean> MY_BOOLEAN = Setting.boolSetting("my.bool.setting", true, Setting.Property.NodeScope);}
  * </pre>
- * To retrieve the value of the setting a {@link Settings} object can be passed directly to the {@link Setting#get(Settings)} method.
+ * To retrieve the value of the setting a {@link org.opensearch.common.settings.Settings} object can be passed directly to the {@link Setting#get(org.opensearch.common.settings.Settings)} method.
  * <pre>
  * final boolean myBooleanValue = MY_BOOLEAN.get(settings);
  * </pre>
@@ -575,12 +576,12 @@ public class Setting<T> implements ToXContentObject {
         if (this.isDeprecated() && this.exists(settings)) {
             // It would be convenient to show its replacement key, but replacement is often not so simple
             final String key = getKey();
-            Settings.DeprecationLoggerHolder.deprecationLogger.deprecate(
-                key,
-                "[{}] setting was deprecated in OpenSearch and will be removed in a future release! "
-                    + "See the breaking changes documentation for the next major version.",
-                key
-            );
+//            Settings.DeprecationLoggerHolder.deprecationLogger.deprecate(
+//                key,
+//                "[{}] setting was deprecated in OpenSearch and will be removed in a future release! "
+//                    + "See the breaking changes documentation for the next major version.",
+//                key
+//            );
         }
     }
 
@@ -2164,7 +2165,7 @@ public class Setting<T> implements ToXContentObject {
     }
 
     public static ByteSizeValue parseByteSize(String s, ByteSizeValue minValue, ByteSizeValue maxValue, String key) {
-        ByteSizeValue value = ByteSizeValue.parseBytesSizeValue(s, key);
+        ByteSizeValue value = parseBytesSizeValue(s, key);
         if (value.getBytes() < minValue.getBytes()) {
             final String message = String.format(
                 Locale.ROOT,
@@ -2255,7 +2256,7 @@ public class Setting<T> implements ToXContentObject {
 
         @Override
         public ByteSizeValue apply(String s) {
-            return MemorySizeValue.parseBytesSizeValueOrHeapRatio(s, key);
+            return parseBytesSizeValue(s, key);
         }
 
         public boolean equals(Object obj) {
@@ -2281,7 +2282,7 @@ public class Setting<T> implements ToXContentObject {
      * @return the setting object
      */
     public static Setting<ByteSizeValue> memorySizeSetting(String key, Setting<ByteSizeValue> fallbackSetting, Property... properties) {
-        return new Setting<>(key, fallbackSetting, (s) -> MemorySizeValue.parseBytesSizeValueOrHeapRatio(s, key), properties);
+        return new Setting<>(key, fallbackSetting, (s) -> parseBytesSizeValue(s, key), properties);
     }
 
     public static <T> Setting<List<T>> listSetting(
