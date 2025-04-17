@@ -36,11 +36,11 @@ import org.opensearch.LegacyESVersion;
 import org.opensearch.Version;
 import org.opensearch.common.Booleans;
 import org.opensearch.common.annotation.PublicApi;
-import org.opensearch.common.logging.DeprecationLogger;
+//import org.opensearch.common.logging.DeprecationLogger;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Setting.Property;
 import org.opensearch.common.settings.Settings;
-import org.opensearch.transport.RemoteClusterService;
+//import org.opensearch.transport.RemoteClusterService;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -58,7 +58,7 @@ import java.util.TreeSet;
 @PublicApi(since = "1.0.0")
 public abstract class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole> {
 
-    private static final DeprecationLogger deprecationLogger = DeprecationLogger.getLogger(DiscoveryNodeRole.class);
+    //private static final DeprecationLogger deprecationLogger = DeprecationLogger.getLogger(DiscoveryNodeRole.class);
     public static final String MASTER_ROLE_DEPRECATION_MESSAGE =
         "Assigning [master] role in setting [node.roles] is deprecated. To promote inclusive language, please use [cluster_manager] role instead.";
     private final String roleName;
@@ -236,7 +236,7 @@ public abstract class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole>
 
         @Override
         public void validateRole(List<DiscoveryNodeRole> roles) {
-            deprecationLogger.deprecate("node_role_master", MASTER_ROLE_DEPRECATION_MESSAGE);
+            //deprecationLogger.deprecate("node_role_master", MASTER_ROLE_DEPRECATION_MESSAGE);
         }
 
     };
@@ -288,8 +288,7 @@ public abstract class DiscoveryNodeRole implements Comparable<DiscoveryNodeRole>
         public Setting<Boolean> legacySetting() {
             // copy the setting here so we can mark it private in org.opensearch.node.Node
             return Setting.boolSetting(
-                "node.remote_cluster_client",
-                RemoteClusterService.ENABLE_REMOTE_CLUSTERS,
+                "node.remote_cluster_client", true,
                 Property.Deprecated,
                 Property.NodeScope
             );

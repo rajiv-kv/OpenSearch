@@ -32,7 +32,7 @@
 
 package org.opensearch.common.settings;
 
-import org.opensearch.common.settings.settings.PropertyPlaceholder;
+import org.opensearch.common.settings.PropertyPlaceholder;
 import org.opensearch.test.OpenSearchTestCase;
 
 import java.util.LinkedHashMap;

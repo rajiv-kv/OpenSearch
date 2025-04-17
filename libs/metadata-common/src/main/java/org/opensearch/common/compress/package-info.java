@@ -6,7 +6,5 @@
  * compatible open source license.
  */
 
-/**
- * Contains offline metadata related classes
- */
-package org.opensearch.metadata.common;
+/** Base compression package. */
+package org.opensearch.common.compress;

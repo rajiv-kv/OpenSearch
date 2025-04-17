@@ -6,6 +6,5 @@
  * compatible open source license.
  */
 
-package org.opensearch.metadata.common;
-
-public interface MetadataStore {}
+/** XContent specific support classes package. */
+package org.opensearch.common.xcontent.support;

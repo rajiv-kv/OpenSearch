@@ -45,8 +45,7 @@ import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.common.io.stream.VerifiableWriteable;
 import org.opensearch.core.xcontent.XContentBuilder;
-import org.opensearch.index.mapper.DocumentMapper;
-import org.opensearch.index.mapper.MapperService;
+//import org.opensearch.index.mapper.DocumentMapper;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -63,7 +62,7 @@ import static org.opensearch.common.xcontent.support.XContentMapValues.nodeBoole
  */
 @PublicApi(since = "1.0.0")
 public class MappingMetadata extends AbstractDiffable<MappingMetadata> implements VerifiableWriteable {
-    public static final MappingMetadata EMPTY_MAPPINGS = new MappingMetadata(MapperService.SINGLE_MAPPING_NAME, Collections.emptyMap());
+    public static final MappingMetadata EMPTY_MAPPINGS = new MappingMetadata("_doc", Collections.emptyMap());
 
     private final String type;
 
@@ -71,13 +70,17 @@ public class MappingMetadata extends AbstractDiffable<MappingMetadata> implement
 
     private final boolean routingRequired;
 
-    public MappingMetadata(DocumentMapper docMapper) {
-        this.type = docMapper.type();
-        this.source = docMapper.mappingSource();
-        this.routingRequired = docMapper.routingFieldMapper().required();
-    }
-
-    @SuppressWarnings("unchecked")
+//    public MappingMetadata(DocumentMapper docMapper) {
+//        this.type = docMapper.type();
+//        this.source = docMapper.mappingSource();
+//        this.routingRequired = docMapper.routingFieldMapper().required();
+//    }
+     public MappingMetadata(String type, CompressedXContent source, boolean routingRequired) {
+            this.type = type;
+            this.source = source;
+            this.routingRequired = routingRequired;
+     }
+//    @SuppressWarnings("unchecked")
     public MappingMetadata(CompressedXContent mapping) {
         this.source = mapping;
         Map<String, Object> mappingMap = XContentHelper.convertToMap(mapping.compressedReference(), true).v2();

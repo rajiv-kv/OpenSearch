@@ -32,6 +32,19 @@
 
 package org.opensearch.cluster.node;
 
+import org.opensearch.Version;
+import org.opensearch.common.UUIDs;
+import org.opensearch.common.annotation.PublicApi;
+import org.opensearch.common.settings.Setting;
+import org.opensearch.common.settings.Settings;
+import org.opensearch.core.common.io.stream.BufferedChecksumStreamOutput;
+import org.opensearch.core.common.io.stream.StreamInput;
+import org.opensearch.core.common.io.stream.StreamOutput;
+import org.opensearch.core.common.io.stream.VerifiableWriteable;
+import org.opensearch.core.common.transport.TransportAddress;
+import org.opensearch.core.xcontent.ToXContentFragment;
+import org.opensearch.core.xcontent.XContentBuilder;
+
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
@@ -46,20 +59,6 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.opensearch.Version;
-import org.opensearch.common.UUIDs;
-import org.opensearch.common.annotation.PublicApi;
-import org.opensearch.common.settings.Settings;
-import org.opensearch.core.common.io.stream.BufferedChecksumStreamOutput;
-import org.opensearch.core.common.io.stream.StreamInput;
-import org.opensearch.core.common.io.stream.StreamOutput;
-import org.opensearch.core.common.io.stream.VerifiableWriteable;
-import org.opensearch.core.common.transport.TransportAddress;
-import org.opensearch.core.xcontent.ToXContentFragment;
-import org.opensearch.core.xcontent.XContentBuilder;
-import org.opensearch.node.Node;
-import org.opensearch.node.NodeRoleSettings;
-import org.opensearch.node.remotestore.RemoteStoreNodeAttribute;
 
 /**
  * A discovery node represents a node that is part of the cluster.
@@ -70,15 +69,6 @@ import org.opensearch.node.remotestore.RemoteStoreNodeAttribute;
 public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
 
     static final String COORDINATING_ONLY = "coordinating_only";
-
-    public static boolean nodeRequiresLocalStorage(Settings settings) {
-        boolean localStorageEnable = Node.NODE_LOCAL_STORAGE_SETTING.get(settings);
-        if (localStorageEnable == false && (isDataNode(settings) || isClusterManagerNode(settings))) {
-            // TODO: make this a proper setting validation logic, requiring multi-settings validation
-            throw new IllegalArgumentException("storage can not be disabled for cluster-manager and data nodes");
-        }
-        return localStorageEnable;
-    }
 
     public static boolean hasRole(final Settings settings, final DiscoveryNodeRole role) {
         /*
@@ -99,7 +89,7 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
         return hasRole(settings, DiscoveryNodeRole.MASTER_ROLE) || hasRole(settings, DiscoveryNodeRole.CLUSTER_MANAGER_ROLE);
     }
 
-    /** @deprecated As of 2.2, because supporting inclusive language, replaced by {@link #isClusterManagerNode(org.opensearch.common.settings.Settings)} */
+    /** @deprecated As of 2.2, because supporting inclusive language, replaced by {@link #isClusterManagerNode(Settings)} */
     @Deprecated
     public static boolean isMasterNode(Settings settings) {
         return isClusterManagerNode(settings);
@@ -107,12 +97,9 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
 
     /**
      * Due to the way that plugins may not be available when settings are being initialized,
-     * not all roles may be available from a static/initializing context such as a {@link org.opensearch.common.settings.Setting}
+     * not all roles may be available from a static/initializing context such as a {@link Setting}
      * default value function. In that case, be warned that this may not include all plugin roles.
      */
-    public static boolean isDataNode(final Settings settings) {
-        return getRolesFromSettings(settings).stream().anyMatch(DiscoveryNodeRole::canContainData);
-    }
 
     public static boolean isIngestNode(Settings settings) {
         return hasRole(settings, DiscoveryNodeRole.INGEST_ROLE);
@@ -126,9 +113,7 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
         return hasRole(settings, DiscoveryNodeRole.SEARCH_ROLE);
     }
 
-    public static boolean isDedicatedSearchNode(Settings settings) {
-        return getRolesFromSettings(settings).stream().allMatch(DiscoveryNodeRole.SEARCH_ROLE::equals);
-    }
+
 
     private final String nodeName;
     private final String nodeId;
@@ -141,9 +126,9 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
     private final SortedSet<DiscoveryNodeRole> roles;
 
     /**
-     * Creates a new {@link org.opensearch.cluster.node.DiscoveryNode}
+     * Creates a new {@link DiscoveryNode}
      * <p>
-     * <b>Note:</b> if the version of the node is unknown {@link org.opensearch.Version#minimumCompatibilityVersion()} should be used for the current
+     * <b>Note:</b> if the version of the node is unknown {@link Version#minimumCompatibilityVersion()} should be used for the current
      * version. it corresponds to the minimum version this opensearch version can communicate with. If a higher version is used
      * the node might not be able to communicate with the remote node. After initial handshakes node versions will be discovered
      * and updated.
@@ -158,9 +143,9 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
     }
 
     /**
-     * Creates a new {@link org.opensearch.cluster.node.DiscoveryNode}
+     * Creates a new {@link DiscoveryNode}
      * <p>
-     * <b>Note:</b> if the version of the node is unknown {@link org.opensearch.Version#minimumCompatibilityVersion()} should be used for the current
+     * <b>Note:</b> if the version of the node is unknown {@link Version#minimumCompatibilityVersion()} should be used for the current
      * version. it corresponds to the minimum version this opensearch version can communicate with. If a higher version is used
      * the node might not be able to communicate with the remote node. After initial handshakes node versions will be discovered
      * and updated.
@@ -183,9 +168,9 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
     }
 
     /**
-     * Creates a new {@link org.opensearch.cluster.node.DiscoveryNode}
+     * Creates a new {@link DiscoveryNode}
      * <p>
-     * <b>Note:</b> if the version of the node is unknown {@link org.opensearch.Version#minimumCompatibilityVersion()} should be used for the current
+     * <b>Note:</b> if the version of the node is unknown {@link Version#minimumCompatibilityVersion()} should be used for the current
      * version. it corresponds to the minimum version this opensearch version can communicate with. If a higher version is used
      * the node might not be able to communicate with the remote node. After initial handshakes node versions will be discovered
      * and updated.
@@ -220,9 +205,9 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
     }
 
     /**
-     * Creates a new {@link org.opensearch.cluster.node.DiscoveryNode}.
+     * Creates a new {@link DiscoveryNode}.
      * <p>
-     * <b>Note:</b> if the version of the node is unknown {@link org.opensearch.Version#minimumCompatibilityVersion()} should be used for the current
+     * <b>Note:</b> if the version of the node is unknown {@link Version#minimumCompatibilityVersion()} should be used for the current
      * version. it corresponds to the minimum version this opensearch version can communicate with. If a higher version is used
      * the node might not be able to communicate with the remote node. After initial handshakes node versions will be discovered
      * and updated.
@@ -277,23 +262,6 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
         this.roles = Collections.unmodifiableSortedSet(new TreeSet<>(roles));
     }
 
-    /** Creates a DiscoveryNode representing the local node. */
-    public static DiscoveryNode createLocal(Settings settings, TransportAddress publishAddress, String nodeId) {
-        Map<String, String> attributes = Node.NODE_ATTRIBUTES.getAsMap(settings);
-        Set<DiscoveryNodeRole> roles = getRolesFromSettings(settings);
-        return new DiscoveryNode(Node.NODE_NAME_SETTING.get(settings), nodeId, publishAddress, attributes, roles, Version.CURRENT);
-    }
-
-    /** extract node roles from the given settings */
-    public static Set<DiscoveryNodeRole> getRolesFromSettings(final Settings settings) {
-        if (NodeRoleSettings.NODE_ROLES_SETTING.exists(settings)) {
-            validateLegacySettings(settings, roleMap);
-            return Collections.unmodifiableSet(new HashSet<>(NodeRoleSettings.NODE_ROLES_SETTING.get(settings)));
-        } else {
-            return roleMap.values().stream().filter(s -> s.isEnabledByDefault(settings)).collect(Collectors.toSet());
-        }
-    }
-
     private static void validateLegacySettings(final Settings settings, final Map<String, DiscoveryNodeRole> roleMap) {
         for (final DiscoveryNodeRole role : roleMap.values()) {
             if (role.legacySetting() != null && role.legacySetting().exists(settings)) {
@@ -309,9 +277,9 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
     }
 
     /**
-     * Creates a new {@link org.opensearch.cluster.node.DiscoveryNode} by reading from the stream provided as argument
+     * Creates a new {@link DiscoveryNode} by reading from the stream provided as argument
      * @param in the stream
-     * @throws java.io.IOException if there is an error while reading from the stream
+     * @throws IOException if there is an error while reading from the stream
      */
     public DiscoveryNode(StreamInput in) throws IOException {
         this.nodeName = in.readString().intern();
@@ -429,7 +397,7 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
      * of a node process. When ever a node is restarted, it's ephemeral id is required to change (while it's {@link #getId()}
      * will be read from the data folder and will remain the same across restarts). Since all node attributes and addresses
      * are maintained during the life span of a node process, we can (and are) using the ephemeralId in
-     * {@link org.opensearch.cluster.node.DiscoveryNode#equals(Object)}.
+     * {@link DiscoveryNode#equals(Object)}.
      */
     public String getEphemeralId() {
         return ephemeralId;
@@ -577,18 +545,6 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
             roles.stream().map(DiscoveryNodeRole::roleNameAbbreviation).sorted().forEach(sb::append);
             sb.append('}');
         }
-        if (!attributes.isEmpty()) {
-            sb.append(attributes.entrySet().stream().filter(entry -> {
-                for (String prefix : RemoteStoreNodeAttribute.REMOTE_STORE_NODE_ATTRIBUTE_KEY_PREFIX) {
-                    if (entry.getKey().startsWith(prefix)) {
-                        return false;
-                    }
-                }
-                return true;
-            }) // filter remote_store attributes
-               // from logging to reduce noise.
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)));
-        }
         return sb.toString();
     }
 
@@ -649,7 +605,7 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
 
     /**
      * Load the deprecated {@link DiscoveryNodeRole#MASTER_ROLE}.
-     * Master role is not added into BUILT_IN_ROLES, because {@link #setAdditionalRoles(java.util.Set)} check role name abbreviation duplication,
+     * Master role is not added into BUILT_IN_ROLES, because {@link #setAdditionalRoles(Set)} check role name abbreviation duplication,
      * and CLUSTER_MANAGER_ROLE has the same abbreviation name with MASTER_ROLE.
      */
     public static void setDeprecatedMasterRole() {

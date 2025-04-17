@@ -6,12 +6,5 @@
  * compatible open source license.
  */
 
-package org.opensearch.common.xcontent;
-
-import org.opensearch.core.xcontent.XContentBuilder;
-
-public interface XContentFactory {
-    static XContentBuilder jsonBuilder() {
-        return null;
-    }
-}
+/** OpenSearch specific lucene store package. */
+package org.opensearch.common.lucene.store;

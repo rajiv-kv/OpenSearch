@@ -6,17 +6,5 @@
  * compatible open source license.
  */
 
-package org.opensearch.metadata.common;
-
-/**
- * A Background Task
- */
-public class MetadataService {
-
-    /**
-     * te
-     */
-    public MetadataService() {
-
-    }
-}
+/** Base Utilitiy Classes package. */
+package org.opensearch.common.util;

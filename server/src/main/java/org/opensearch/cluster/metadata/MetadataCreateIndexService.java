@@ -1343,14 +1343,14 @@ public class MetadataCreateIndexService {
         boolean isSystem,
         Map<String, DiffableStringMap> customData,
         Context context
-    ) {
+    )  {
         IndexMetadata.Builder indexMetadataBuilder = createIndexMetadataBuilder(indexName, sourceMetadata, indexSettings, routingNumShards);
         indexMetadataBuilder.system(isSystem);
         // now, update the mappings with the actual source
         Map<String, MappingMetadata> mappingsMetadata = new HashMap<>();
         DocumentMapper mapper = documentMapperSupplier.get();
         if (mapper != null) {
-            MappingMetadata mappingMd = new MappingMetadata(mapper);
+            MappingMetadata mappingMd = new MappingMetadata(mapper.type(), mapper.mappingSource(), mapper.routingFieldMapper().required());
             mappingsMetadata.put(mapper.type(), mappingMd);
         }
 
