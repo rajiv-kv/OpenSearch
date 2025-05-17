@@ -1252,9 +1252,9 @@ public class MetadataCreateIndexService {
     ) {
         List<AliasMetadata> resolvedAliases = new ArrayList<>();
         for (Alias alias : aliases) {
-            aliasValidator.validateAlias(alias, index, metadata);
+            aliasValidator.validateAlias(alias, index, metadata.getIndices());
             if (Strings.hasLength(alias.filter())) {
-                aliasValidator.validateAliasFilter(alias.name(), alias.filter(), queryShardContext, xContentRegistry);
+                aliasValidator.validateAliasFilter(alias.name(), alias.filter(), xContentRegistry);
             }
             AliasMetadata aliasMetadata = AliasMetadata.builder(alias.name())
                 .filter(alias.filter())
@@ -1288,12 +1288,11 @@ public class MetadataCreateIndexService {
                     aliasMetadata = AliasMetadata.newAliasMetadata(aliasMetadata, templatedAlias);
                 }
 
-                aliasValidator.validateAliasMetadata(aliasMetadata, index, metadata);
+                aliasValidator.validateAliasMetadata(aliasMetadata, index, metadata.getIndices());
                 if (aliasMetadata.filter() != null) {
                     aliasValidator.validateAliasFilter(
                         aliasMetadata.alias(),
                         aliasMetadata.filter().uncompressed(),
-                        queryShardContext,
                         xContentRegistry
                     );
                 }

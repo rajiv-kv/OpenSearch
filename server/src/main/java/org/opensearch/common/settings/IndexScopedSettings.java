@@ -31,6 +31,7 @@
 
 package org.opensearch.common.settings;
 
+import org.opensearch.cluster.metadata.AutoExpandReplicas;
 import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.cluster.metadata.MetadataIndexStateService;
 import org.opensearch.cluster.routing.UnassignedInfo;
@@ -82,6 +83,8 @@ public final class IndexScopedSettings extends AbstractScopedSettings {
 
     public static final Predicate<String> ARCHIVED_SETTINGS_KEY_PREDICATE = (s) -> s.startsWith(ARCHIVED_SETTINGS_PREFIX);
 
+    public static final Setting<AutoExpandReplicas> INDEX_AUTO_EXPAND_REPLICAS_SETTING = AutoExpandReplicas.SETTING;
+
     public static final Set<Setting<?>> BUILT_IN_INDEX_SETTINGS = Collections.unmodifiableSet(
         new HashSet<>(
             Arrays.asList(
@@ -93,7 +96,7 @@ public final class IndexScopedSettings extends AbstractScopedSettings {
                 IndexMetadata.INDEX_ROUTING_EXCLUDE_GROUP_SETTING,
                 IndexMetadata.INDEX_ROUTING_INCLUDE_GROUP_SETTING,
                 IndexMetadata.INDEX_ROUTING_REQUIRE_GROUP_SETTING,
-                IndexMetadata.INDEX_AUTO_EXPAND_REPLICAS_SETTING,
+                INDEX_AUTO_EXPAND_REPLICAS_SETTING,
                 IndexMetadata.INDEX_NUMBER_OF_REPLICAS_SETTING,
                 IndexMetadata.INDEX_NUMBER_OF_SHARDS_SETTING,
                 IndexMetadata.INDEX_ROUTING_PARTITION_SIZE_SETTING,

@@ -192,7 +192,7 @@ public class MetadataIndexAliasesService {
                         aliasValidator.validateAliasFilter(
                             alias,
                             filter,
-                            indexService.newQueryShardContext(0, null, () -> System.currentTimeMillis(), null),
+                          //  indexService.newQueryShardContext(0, null, () -> System.currentTimeMillis(), null),
                             xContentRegistry
                         );
                     }

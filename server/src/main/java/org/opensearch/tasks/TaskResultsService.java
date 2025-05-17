@@ -50,6 +50,7 @@ import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.cluster.metadata.MappingMetadata;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
+import org.opensearch.common.settings.IndexScopedSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.util.io.Streams;
@@ -200,7 +201,7 @@ public class TaskResultsService {
     private Settings taskResultIndexSettings() {
         return Settings.builder()
             .put(IndexMetadata.INDEX_NUMBER_OF_SHARDS_SETTING.getKey(), 1)
-            .put(IndexMetadata.INDEX_AUTO_EXPAND_REPLICAS_SETTING.getKey(), "0-1")
+            .put(IndexScopedSettings.INDEX_AUTO_EXPAND_REPLICAS_SETTING.getKey(), "0-1")
             .put(IndexMetadata.SETTING_PRIORITY, Integer.MAX_VALUE)
             .build();
     }
