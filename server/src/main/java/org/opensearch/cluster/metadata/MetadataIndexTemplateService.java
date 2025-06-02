@@ -161,6 +161,8 @@ public class MetadataIndexTemplateService {
         );
     }
 
+
+
     public void removeTemplates(final RemoveRequest request, final RemoveListener listener) {
         clusterService.submitStateUpdateTask("remove-index-template [" + request.name + "]", new ClusterStateUpdateTask(Priority.URGENT) {
 
@@ -592,8 +594,23 @@ public class MetadataIndexTemplateService {
         String contextTemplateName = findContextTemplateName(metadata, context);
         return metadata.componentTemplates().getOrDefault(contextTemplateName, null);
     }
+    public static ComponentTemplate findComponentTemplate(MetadataCreateIndexService.Metadata metadata, Context context) {
+        String contextTemplateName = findContextTemplateName(metadata, context);
+        return metadata.componentTemplates().getOrDefault(contextTemplateName, null);
 
+
+    }
     static String findContextTemplateName(Metadata metadata, Context context) {
+        if (context == null) {
+            return null;
+        }
+        final boolean searchSpecificVersion = !Context.LATEST_VERSION.equals(context.version());
+        return Optional.ofNullable(metadata.systemTemplatesLookup())
+            .map(coll -> coll.get(context.name()))
+            .map(coll -> coll.get(searchSpecificVersion ? Long.parseLong(context.version()) : coll.lastKey()))
+            .orElse(null);
+    }
+    static String findContextTemplateName(MetadataCreateIndexService.Metadata metadata, Context context) {
         if (context == null) {
             return null;
         }
@@ -1149,6 +1166,56 @@ public class MetadataIndexTemplateService {
         return Collections.unmodifiableList(matchedTemplates);
     }
 
+    public static List<IndexTemplateMetadata> findV1Templates(MetadataCreateIndexService.Metadata metadata, String indexName, @Nullable Boolean isHidden) {
+        final Predicate<String> patternMatchPredicate = pattern -> Regex.simpleMatch(pattern, indexName);
+        final List<IndexTemplateMetadata> matchedTemplates = new ArrayList<>();
+        for (final IndexTemplateMetadata template : metadata.templates().values()) {
+            if (isHidden == null || isHidden == Boolean.FALSE) {
+                final boolean matched = template.patterns().stream().anyMatch(patternMatchPredicate);
+                if (matched) {
+                    matchedTemplates.add(template);
+                }
+            } else {
+                assert isHidden == Boolean.TRUE;
+                final boolean isNotMatchAllTemplate = template.patterns().stream().noneMatch(Regex::isMatchAllPattern);
+                if (isNotMatchAllTemplate) {
+                    if (template.patterns().stream().anyMatch(patternMatchPredicate)) {
+                        matchedTemplates.add(template);
+                    }
+                }
+            }
+        }
+        CollectionUtil.timSort(matchedTemplates, Comparator.comparingInt(IndexTemplateMetadata::order).reversed());
+
+        // this is complex but if the index is not hidden in the create request but is hidden as the result of template application,
+        // then we need to exclude global templates
+        if (isHidden == null) {
+            final Optional<IndexTemplateMetadata> templateWithHiddenSetting = matchedTemplates.stream()
+                .filter(template -> IndexMetadata.INDEX_HIDDEN_SETTING.exists(template.settings()))
+                .findFirst();
+            if (templateWithHiddenSetting.isPresent()) {
+                final boolean templatedIsHidden = IndexMetadata.INDEX_HIDDEN_SETTING.get(templateWithHiddenSetting.get().settings());
+                if (templatedIsHidden) {
+                    // remove the global templates
+                    matchedTemplates.removeIf(current -> current.patterns().stream().anyMatch(Regex::isMatchAllPattern));
+                }
+                // validate that hidden didn't change
+                final Optional<IndexTemplateMetadata> templateWithHiddenSettingPostRemoval = matchedTemplates.stream()
+                    .filter(template -> IndexMetadata.INDEX_HIDDEN_SETTING.exists(template.settings()))
+                    .findFirst();
+                if (templateWithHiddenSettingPostRemoval.isPresent() == false
+                    || templateWithHiddenSetting.get() != templateWithHiddenSettingPostRemoval.get()) {
+                    throw new IllegalStateException(
+                        "A global index template ["
+                            + templateWithHiddenSetting.get().name()
+                            + "] defined the index hidden setting, which is not allowed"
+                    );
+                }
+            }
+        }
+        return Collections.unmodifiableList(matchedTemplates);
+    }
+
     /**
      * Return the name (id) of the highest matching index template for the given index name. In
      * the event that no templates are matched, {@code null} is returned.
@@ -1204,6 +1271,56 @@ public class MetadataIndexTemplateService {
         return winnerName;
     }
 
+    @Nullable
+    public static String findV2Template(MetadataCreateIndexService.Metadata metadata, String indexName, boolean isHidden) {
+        final Predicate<String> patternMatchPredicate = pattern -> Regex.simpleMatch(pattern, indexName);
+        final Map<ComposableIndexTemplate, String> matchedTemplates = new HashMap<>();
+        for (Map.Entry<String, ComposableIndexTemplate> entry : metadata.templatesV2().entrySet()) {
+            final String name = entry.getKey();
+            final ComposableIndexTemplate template = entry.getValue();
+            if (isHidden == false) {
+                final boolean matched = template.indexPatterns().stream().anyMatch(patternMatchPredicate);
+                if (matched) {
+                    matchedTemplates.put(template, name);
+                }
+            } else {
+                final boolean isNotMatchAllTemplate = template.indexPatterns().stream().noneMatch(Regex::isMatchAllPattern);
+                if (isNotMatchAllTemplate) {
+                    if (template.indexPatterns().stream().anyMatch(patternMatchPredicate)) {
+                        matchedTemplates.put(template, name);
+                    }
+                }
+            }
+        }
+
+        if (matchedTemplates.size() == 0) {
+            return null;
+        }
+
+        final List<ComposableIndexTemplate> candidates = new ArrayList<>(matchedTemplates.keySet());
+        CollectionUtil.timSort(candidates, Comparator.comparing(ComposableIndexTemplate::priorityOrZero, Comparator.reverseOrder()));
+
+        assert candidates.size() > 0 : "we should have returned early with no candidates";
+        ComposableIndexTemplate winner = candidates.get(0);
+        String winnerName = matchedTemplates.get(winner);
+
+        // if the winner template is a global template that specifies the `index.hidden` setting (which is not allowed, so it'd be due to
+        // a restored index cluster state that modified a component template used by this global template such that it has this setting)
+        // we will fail and the user will have to update the index template and remove this setting or update the corresponding component
+        // template that contributes to the index template resolved settings
+        if (winner.indexPatterns().stream().anyMatch(Regex::isMatchAllPattern)
+            && IndexMetadata.INDEX_HIDDEN_SETTING.exists(resolveSettings(metadata, winnerName))) {
+            throw new IllegalStateException(
+                "global index template ["
+                    + winnerName
+                    + "], composed of component templates ["
+                    + String.join(",", winner.composedOf())
+                    + "] defined the index.hidden setting, which is not allowed"
+            );
+        }
+
+        return winnerName;
+    }
     /**
      * Collect the given v2 template into an ordered list of mappings.
      */
@@ -1263,6 +1380,61 @@ public class MetadataIndexTemplateService {
         return Collections.unmodifiableList(mappings);
     }
 
+    public static List<CompressedXContent> collectMappings(final MetadataCreateIndexService.ClusterState state, final String templateName, final String indexName)
+        throws Exception {
+        final ComposableIndexTemplate template = state.metadata().templatesV2().get(templateName);
+        assert template != null : "attempted to resolve mappings for a template ["
+            + templateName
+            + "] that did not exist in the cluster state";
+        if (template == null) {
+            return Collections.emptyList();
+        }
+
+        final Map<String, ComponentTemplate> componentTemplates = state.metadata().componentTemplates();
+        List<CompressedXContent> mappings = template.composedOf()
+            .stream()
+            .map(componentTemplates::get)
+            .filter(Objects::nonNull)
+            .map(ComponentTemplate::template)
+            .map(Template::mappings)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toCollection(LinkedList::new));
+        // Add the actual index template's mappings, since it takes the next precedence
+        Optional.ofNullable(template.template()).map(Template::mappings).ifPresent(mappings::add);
+        if (template.getDataStreamTemplate() != null && indexName.startsWith(DataStream.BACKING_INDEX_PREFIX)) {
+            // add a default mapping for the timestamp field, at the lowest precedence, to make bootstrapping data streams more
+            // straightforward as all backing indices are required to have a timestamp field
+            String timestampFieldName = template.getDataStreamTemplate().getTimestampField().getName();
+            mappings.add(0, new CompressedXContent(getTimestampFieldMapping(timestampFieldName)));
+        }
+
+        // Only include timestamp mapping snippet if creating backing index.
+        if (indexName.startsWith(DataStream.BACKING_INDEX_PREFIX)) {
+            // Only if template has data stream definition this should be added and
+            // adding this template last, since timestamp field should have highest precedence:
+            Optional.ofNullable(template.getDataStreamTemplate())
+                .map(ComposableIndexTemplate.DataStreamTemplate::getDataStreamMappingSnippet)
+                .map(mapping -> {
+                    try (XContentBuilder builder = MediaTypeRegistry.JSON.contentBuilder()) {
+                        builder.value(mapping);
+                        return new CompressedXContent(BytesReference.bytes(builder));
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                })
+                .ifPresent(mappings::add);
+        }
+
+        // Now use context mappings which take the highest precedence
+        Optional.ofNullable(template.context())
+            .map(ctx -> findContextTemplateName(state.metadata(), ctx))
+            .map(name -> state.metadata().componentTemplates().get(name))
+            .map(ComponentTemplate::template)
+            .map(Template::mappings)
+            .ifPresent(mappings::add);
+
+        return Collections.unmodifiableList(mappings);
+    }
     /**
      * Returns the default mapping snippet for the timestamp field by configuring it as a 'date' type.
      * This is added at the lowest precedence to allow users to override this mapping.
@@ -1308,6 +1480,38 @@ public class MetadataIndexTemplateService {
         return resolveSettings(metadata, template);
     }
 
+    public static Settings resolveSettings(final MetadataCreateIndexService.Metadata metadata, final String templateName) {
+        final ComposableIndexTemplate template = metadata.templatesV2().get(templateName);
+        assert template != null : "attempted to resolve settings for a template ["
+            + templateName
+            + "] that did not exist in the cluster state";
+        if (template == null) {
+            return Settings.EMPTY;
+        }
+        return resolveSettings(metadata, template);
+    }
+    private static Settings resolveSettings(MetadataCreateIndexService.Metadata metadata, ComposableIndexTemplate template) {
+        final Map<String, ComponentTemplate> componentTemplates = metadata.componentTemplates();
+        List<Settings> componentSettings = template.composedOf()
+            .stream()
+            .map(componentTemplates::get)
+            .filter(Objects::nonNull)
+            .map(ComponentTemplate::template)
+            .map(Template::settings)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toList());
+
+        Settings.Builder templateSettings = Settings.builder();
+        componentSettings.forEach(templateSettings::put);
+        // Add the actual index template's settings now, since it takes the next precedence.
+        Optional.ofNullable(template.template()).map(Template::settings).ifPresent(templateSettings::put);
+
+        // Add the template referred by context since it will take the highest precedence.
+        final ComponentTemplate componentTemplate = findComponentTemplate(metadata, template.context());
+        Optional.ofNullable(componentTemplate).map(ComponentTemplate::template).map(Template::settings).ifPresent(templateSettings::put);
+
+        return templateSettings.build();
+    }
     private static Settings resolveSettings(Metadata metadata, ComposableIndexTemplate template) {
         final Map<String, ComponentTemplate> componentTemplates = metadata.componentTemplates();
         List<Settings> componentSettings = template.composedOf()
@@ -1352,6 +1556,40 @@ public class MetadataIndexTemplateService {
      * Resolve the given v2 template into an ordered list of aliases
      */
     public static List<Map<String, AliasMetadata>> resolveAliases(final Metadata metadata, final String templateName) {
+        final ComposableIndexTemplate template = metadata.templatesV2().get(templateName);
+        assert template != null : "attempted to resolve aliases for a template ["
+            + templateName
+            + "] that did not exist in the cluster state";
+        if (template == null) {
+            return Collections.emptyList();
+        }
+        final Map<String, ComponentTemplate> componentTemplates = metadata.componentTemplates();
+        List<Map<String, AliasMetadata>> aliases = template.composedOf()
+            .stream()
+            .map(componentTemplates::get)
+            .filter(Objects::nonNull)
+            .map(ComponentTemplate::template)
+            .map(Template::aliases)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toList());
+
+        // Add the actual index template's aliases now if they exist
+        Optional.ofNullable(template.template()).map(Template::aliases).ifPresent(aliases::add);
+
+        // Now use context referenced template's aliases which take the highest precedence
+        if (template.context() != null) {
+            final ComponentTemplate componentTemplate = findComponentTemplate(metadata, template.context());
+            Optional.ofNullable(componentTemplate.template()).map(Template::aliases).ifPresent(aliases::add);
+        }
+
+        // Aliases are applied in order, but subsequent alias configuration from the same name is
+        // ignored, so in order for the order to be correct, alias configuration should be in order
+        // of precedence (with the index template first)
+        Collections.reverse(aliases);
+        return Collections.unmodifiableList(aliases);
+    }
+
+    public static List<Map<String, AliasMetadata>> resolveAliases(final MetadataCreateIndexService.Metadata metadata, final String templateName) {
         final ComposableIndexTemplate template = metadata.templatesV2().get(templateName);
         assert template != null : "attempted to resolve aliases for a template ["
             + templateName

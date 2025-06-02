@@ -182,8 +182,9 @@ public class MetadataCreateDataStreamService {
             firstBackingIndexName,
             firstBackingIndexName
         ).dataStreamName(request.name).settings(Settings.builder().put("index.hidden", true).build());
+        IndexMetadata firstBackingIndex;
         try {
-            currentState = metadataCreateIndexService.applyCreateIndexRequest(currentState, createIndexRequest, false);
+            firstBackingIndex = metadataCreateIndexService.applyCreateIndexRequest(currentState, createIndexRequest, false);
         } catch (ResourceAlreadyExistsException e) {
             // Rethrow as OpenSearchStatusException, so that bulk transport action doesn't ignore it during
             // auto index/data stream creation.
@@ -195,7 +196,7 @@ public class MetadataCreateDataStreamService {
                 firstBackingIndexName
             );
         }
-        IndexMetadata firstBackingIndex = currentState.metadata().index(firstBackingIndexName);
+        //IndexMetadata firstBackingIndex = currentState.metadata().index(firstBackingIndexName);
         assert firstBackingIndex != null;
         assert firstBackingIndex.mapping() != null : "no mapping found for backing index [" + firstBackingIndexName + "]";
 

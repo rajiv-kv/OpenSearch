@@ -32,6 +32,7 @@
 
 package org.opensearch.cluster.service;
 
+import org.opensearch.cluster.AckedClusterStateUpdateTask;
 import org.opensearch.cluster.ClusterManagerMetrics;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -389,4 +390,5 @@ public class ClusterService extends AbstractLifecycleComponent {
     ) {
         clusterManagerService.submitStateUpdateTasks(source, tasks, config, executor);
     }
+
 }

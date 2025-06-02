@@ -46,8 +46,11 @@ import org.opensearch.cluster.LocalNodeClusterManagerListener;
 import org.opensearch.cluster.LocalNodeMasterListener;
 import org.opensearch.cluster.NodeConnectionsService;
 import org.opensearch.cluster.TimeoutClusterStateListener;
+import org.opensearch.cluster.block.ClusterBlocks;
+import org.opensearch.cluster.metadata.Metadata;
 import org.opensearch.cluster.metadata.ProcessClusterEventTimeoutException;
 import org.opensearch.cluster.node.DiscoveryNodes;
+import org.opensearch.cluster.routing.RoutingTable;
 import org.opensearch.common.Nullable;
 import org.opensearch.common.Priority;
 import org.opensearch.common.StopWatch;
@@ -121,6 +124,9 @@ public class ClusterApplierService extends AbstractLifecycleComponent implements
     private final Map<TimeoutClusterStateListener, NotifyTimeout> timeoutClusterStateListeners = new ConcurrentHashMap<>();
     private final AtomicReference<ClusterState> preCommitState = new AtomicReference<>(); // last state which is yet to be applied
     private final AtomicReference<ClusterState> state; // last applied state
+    private final AtomicReference<Metadata> metadata = null;// last applied state
+    private final AtomicReference<RoutingTable> routingTable = null; // last applied state
+    private final AtomicReference<ClusterBlocks> clusterBlocks = null; // last applied state
 
     private final String nodeName;
 
@@ -228,10 +234,15 @@ public class ClusterApplierService extends AbstractLifecycleComponent implements
      */
     public ClusterState state() {
         assert assertNotCalledFromClusterStateApplier("the applied cluster state is not yet available");
-        ClusterState clusterState = this.state.get();
-        assert clusterState != null : "initial cluster state not set yet";
+        assert this.state.get() != null : "initial cluster state not set yet";
+        ClusterState clusterState = ClusterState.builder(this.state.get()).
+            metadata(this.metadata.get()).
+            routingTable(this.routingTable.get()).
+            blocks(this.clusterBlocks.get()).
+            build();
         return clusterState;
     }
+
 
     /**
      * Returns true if the appliedClusterState is not null

@@ -54,6 +54,7 @@ import org.opensearch.cluster.metadata.Metadata;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.routing.RerouteService;
+import org.opensearch.cluster.routing.RoutingTable;
 import org.opensearch.cluster.routing.allocation.AllocationService;
 import org.opensearch.cluster.service.ClusterApplier;
 import org.opensearch.cluster.service.ClusterApplier.ClusterApplyListener;
@@ -1914,4 +1915,7 @@ public class Coordinator extends AbstractLifecycleComponent implements Discovery
         return false;
     }
 
+    public RoutingTable get(ClusterStateTermVersion termVersion) {
+        return null;
+    }
 }

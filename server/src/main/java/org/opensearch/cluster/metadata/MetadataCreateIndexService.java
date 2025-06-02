@@ -32,6 +32,8 @@
 
 package org.opensearch.cluster.metadata;
 
+import java.util.LinkedHashMap;
+import java.util.SortedMap;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -46,13 +48,19 @@ import org.opensearch.action.admin.indices.shrink.ResizeType;
 import org.opensearch.action.support.ActiveShardCount;
 import org.opensearch.action.support.ActiveShardsObserver;
 import org.opensearch.cluster.AckedClusterStateUpdateTask;
+import org.opensearch.cluster.ClusterBlockUpdateTask;
 import org.opensearch.cluster.ClusterState;
+import org.opensearch.cluster.ClusterStateTaskListener;
+import org.opensearch.cluster.ClusterStateUpdateTask;
+import org.opensearch.cluster.MetadataUpdateTaskExecutor;
+import org.opensearch.cluster.RoutingTableUpdateTask;
 import org.opensearch.cluster.ack.ClusterStateUpdateResponse;
 import org.opensearch.cluster.ack.CreateIndexClusterStateUpdateResponse;
 import org.opensearch.cluster.applicationtemplates.SystemTemplatesService;
 import org.opensearch.cluster.block.ClusterBlock;
 import org.opensearch.cluster.block.ClusterBlockLevel;
 import org.opensearch.cluster.block.ClusterBlocks;
+import org.opensearch.cluster.coordination.NodeRemovalClusterStateTaskExecutor;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.routing.IndexRoutingTable;
@@ -189,6 +197,8 @@ public class MetadataCreateIndexService {
     private final ClusterManagerTaskThrottler.ThrottlingKey createIndexTaskKey;
     private AwarenessReplicaBalance awarenessReplicaBalance;
 
+    private final LocalClusterManagerUpdateService updateService;
+
     @Nullable
     private final RemoteStoreCustomMetadataResolver remoteStoreCustomMetadataResolver;
 
@@ -226,9 +236,13 @@ public class MetadataCreateIndexService {
         // Task is onboarded for throttling, it will get retried from associated TransportClusterManagerNodeAction.
         createIndexTaskKey = clusterService.registerClusterManagerTask(ClusterManagerTaskKeys.CREATE_INDEX_KEY, true);
         Supplier<Version> minNodeVersionSupplier = () -> clusterService.state().nodes().getMinNodeVersion();
-        remoteStoreCustomMetadataResolver = isRemoteDataAttributePresent(settings)
-            ? new RemoteStoreCustomMetadataResolver(remoteStoreSettings, minNodeVersionSupplier, repositoriesServiceSupplier, settings)
-            : null;
+        remoteStoreCustomMetadataResolver = isRemoteDataAttributePresent(settings) ? new RemoteStoreCustomMetadataResolver(
+            remoteStoreSettings,
+            minNodeVersionSupplier,
+            repositoriesServiceSupplier,
+            settings
+        ) : null;
+        this.updateService =  new LocalClusterManagerUpdateService(clusterService);
     }
 
     /**
@@ -244,9 +258,24 @@ public class MetadataCreateIndexService {
         this.indexSettingProviders.add(provider);
     }
 
-    /**
-     * Validate the name for an index against some static rules and a cluster state.
-     */
+    public void validateIndexName(String index, org.opensearch.cluster.ClusterState state) {
+        validateIndexOrAliasName(index, InvalidIndexNameException::new);
+        if (!index.toLowerCase(Locale.ROOT).equals(index)) {
+            throw new InvalidIndexNameException(index, "must be lowercase");
+        }
+        if (state.metadata().hasIndex(index)) {
+            throw new ResourceAlreadyExistsException(state.metadata().index(index).getIndex());
+        }
+        //        if (state.metadata().hasIndex(index)) {
+        //            throw new ResourceAlreadyExistsException(state.metadata().index(index).getIndex());
+        //        }
+        //        if (state.metadata().hasAlias(index)) {
+        //            throw new InvalidIndexNameException(index, "already exists as alias");
+        //        }
+    }
+        /**
+         * Validate the name for an index against some static rules and a cluster state.
+         */
     public void validateIndexName(String index, ClusterState state) {
         validateIndexOrAliasName(index, InvalidIndexNameException::new);
         if (!index.toLowerCase(Locale.ROOT).equals(index)) {
@@ -255,15 +284,15 @@ public class MetadataCreateIndexService {
 
         // NOTE: dot-prefixed index names are validated after template application, not here
 
-        if (state.routingTable().hasIndex(index)) {
-            throw new ResourceAlreadyExistsException(state.routingTable().index(index).getIndex());
-        }
         if (state.metadata().hasIndex(index)) {
             throw new ResourceAlreadyExistsException(state.metadata().index(index).getIndex());
         }
-        if (state.metadata().hasAlias(index)) {
-            throw new InvalidIndexNameException(index, "already exists as alias");
-        }
+        //        if (state.metadata().hasIndex(index)) {
+        //            throw new ResourceAlreadyExistsException(state.metadata().index(index).getIndex());
+        //        }
+        //        if (state.metadata().hasAlias(index)) {
+        //            throw new InvalidIndexNameException(index, "already exists as alias");
+        //        }
     }
 
     /**
@@ -278,8 +307,7 @@ public class MetadataCreateIndexService {
             } else if (isHidden) {
                 logger.trace("index [{}] is a hidden index", index);
             } else {
-                DEPRECATION_LOGGER.deprecate(
-                    "index_name_starts_with_dot",
+                DEPRECATION_LOGGER.deprecate("index_name_starts_with_dot",
                     "index name [{}] starts with a dot '.', in the next major version, index names "
                         + "starting with a dot are reserved for hidden indices and system indices",
                     index
@@ -339,13 +367,11 @@ public class MetadataCreateIndexService {
      * @param listener the listener on which to send the index creation cluster state update response
      */
     public void createIndex(
-        final CreateIndexClusterStateUpdateRequest request,
-        final ActionListener<CreateIndexClusterStateUpdateResponse> listener
+        final CreateIndexClusterStateUpdateRequest request, final ActionListener<CreateIndexClusterStateUpdateResponse> listener
     ) {
         onlyCreateIndex(request, ActionListener.wrap(response -> {
             if (response.isAcknowledged()) {
-                activeShardsObserver.waitForActiveShards(
-                    new String[] { request.index() },
+                activeShardsObserver.waitForActiveShards(new String[] { request.index() },
                     request.waitForActiveShards(),
                     request.ackTimeout(),
                     shardsAcknowledged -> {
@@ -365,13 +391,136 @@ public class MetadataCreateIndexService {
         }, listener::onFailure));
     }
 
+
+
+
+    public interface ClusterStateUpdateService {
+        void submitUpdateForRequest(CreateIndexClusterStateUpdateRequest request, final IndexMetadataUpdater updater, final ActionListener<ClusterStateUpdateResponse> listener);
+
+    }
+
+    public interface IndexMetadataUpdater<R> {
+        Metadata applyUpdate(R request, ClusterState oldMetadata) throws Exception;
+
+    }
+
+
+    public IndexMetadataUpdater<CreateIndexClusterStateUpdateRequest> updater1 = new IndexMetadataUpdater<CreateIndexClusterStateUpdateRequest>() {
+
+        public ClusterManagerTaskThrottler.ThrottlingKey createIndexTaskKey;
+        ClusterService clusterService;
+        ActionListener<ClusterStateUpdateResponse> listener;
+
+
+        @Override
+        public Metadata applyUpdate(CreateIndexClusterStateUpdateRequest request, ClusterState currentState) throws Exception {
+
+            MetadataUpdateTaskExecutor executor = new MetadataUpdateTaskExecutor();
+            MetadataUpdateTaskExecutor.MetadataUpdater task1 = new MetadataUpdateTaskExecutor.MetadataUpdater() {
+
+                @Override
+                public org.opensearch.cluster.metadata.Metadata execute(org.opensearch.cluster.metadata.Metadata oldMetadata, org.opensearch.cluster.ClusterState state) throws Exception {
+                    IndexMetadata indexMetadata =  applyCreateIndexRequest(state, request, false);
+                    org.opensearch.cluster.metadata.Metadata indexMetadata1 =
+                        clusterStateCreateIndexMetadata(oldMetadata, indexMetadata, null);
+                    return indexMetadata1;
+                }
+            };
+
+            MetadataUpdateTaskExecutor.ClusterBlocksUpdater task2 = new MetadataUpdateTaskExecutor.ClusterBlocksUpdater() {
+                @Override
+                public ClusterBlocks execute(ClusterBlocks oldMetadata, org.opensearch.cluster.ClusterState state) {
+                    ClusterBlocks blocks = clusterStateCreateBlocks(oldMetadata, request.blocks(), state.getMetadata().index(request.index()));
+                    return blocks;
+                }
+            };
+
+            MetadataUpdateTaskExecutor.RoutingTableUpdater task3 = new MetadataUpdateTaskExecutor.RoutingTableUpdater() {
+
+                @Override
+                public RoutingTable execute(RoutingTable oldMetadata, org.opensearch.cluster.ClusterState state) {
+                    RoutingTable routing = clusterStateRoutingTable(state, state.metadata().index(request.index()), allocationService::reroute);
+                    return routing;
+                }
+            };
+
+
+            final Map<MetadataUpdateTaskExecutor.TaskWithType, ClusterStateTaskListener> createIndexTasks = new LinkedHashMap<>(
+            );
+            createIndexTasks.put(task1, executor);
+            createIndexTasks.put(task2, executor);
+            createIndexTasks.put(task3, executor);
+
+            clusterService.submitStateUpdateTasks("create-index [" + request.index() + "], cause [" + request.cause() + "]", createIndexTasks, executor, executor);
+            return null;
+        }
+    };
+
+    public interface RoutingTableUpdater <R> {
+        RoutingTable applyUpdate(R request, ClusterState oldMetadata) throws Exception;
+
+    }
+
+    public interface ClusterBlockUpdater<R> {
+        ClusterBlock applyUpdate(R request, ClusterState oldMetadata) throws Exception;
+
+    }
+
+    public class LocalClusterManagerUpdateService implements ClusterStateUpdateService {
+
+        ClusterService clusterService;
+        IndexMetadataUpdater<CreateIndexClusterStateUpdateRequest> indexMetadataUpdater;
+        RoutingTableUpdater<IndexMetadata> routingTableUpdater;
+        ClusterBlockUpdater<IndexMetadata> clusterBlockUpdater;
+
+        public LocalClusterManagerUpdateService(ClusterService clusterService) {
+            this.clusterService = clusterService;
+        }
+
+        @Override
+        public void submitUpdateForRequest(CreateIndexClusterStateUpdateRequest request, final IndexMetadataUpdater updater, final ActionListener<ClusterStateUpdateResponse> listener) {
+            clusterService.submitStateUpdateTask("create-index [" + request.index() + "], cause [" + request.cause() + "]",
+                new AckedClusterStateUpdateTask<ClusterStateUpdateResponse>(Priority.URGENT, request, listener) {
+                    @Override
+                    protected ClusterStateUpdateResponse newResponse(boolean acknowledged) {
+                        return new ClusterStateUpdateResponse(acknowledged);
+                    }
+
+                    @Override
+                    public ClusterManagerTaskThrottler.ThrottlingKey getClusterManagerThrottlingKey() {
+                        return createIndexTaskKey;
+                    }
+
+                    @Override
+                    public org.opensearch.cluster.ClusterState execute(org.opensearch.cluster.ClusterState currentState) throws Exception {
+                            //return updater.applyUpdate(request, toState(currentState));
+                        //return applyCreateIndexRequest(currentState, request, false);
+                        return null;
+                    }
+
+                    @Override
+                    public void onFailure(String source, Exception e) {
+                        if (e instanceof ResourceAlreadyExistsException) {
+                            logger.trace(() -> new ParameterizedMessage("[{}] failed to create", request.index()), e);
+                        } else {
+                            logger.debug(() -> new ParameterizedMessage("[{}] failed to create", request.index()), e);
+                        }
+                        super.onFailure(source, e);
+                    }
+                }
+            );
+
+        }
+    }
+
+
+
+
     private void onlyCreateIndex(
-        final CreateIndexClusterStateUpdateRequest request,
-        final ActionListener<ClusterStateUpdateResponse> listener
+        final CreateIndexClusterStateUpdateRequest request, final ActionListener<ClusterStateUpdateResponse> listener
     ) {
         normalizeRequestSetting(request);
-        clusterService.submitStateUpdateTask(
-            "create-index [" + request.index() + "], cause [" + request.cause() + "]",
+        clusterService.submitStateUpdateTask("create-index [" + request.index() + "], cause [" + request.cause() + "]",
             new AckedClusterStateUpdateTask<ClusterStateUpdateResponse>(Priority.URGENT, request, listener) {
                 @Override
                 protected ClusterStateUpdateResponse newResponse(boolean acknowledged) {
@@ -384,8 +533,13 @@ public class MetadataCreateIndexService {
                 }
 
                 @Override
-                public ClusterState execute(ClusterState currentState) throws Exception {
-                    return applyCreateIndexRequest(currentState, request, false);
+                public org.opensearch.cluster.ClusterState execute(org.opensearch.cluster.ClusterState currentState) throws Exception {
+                    IndexMetadata indexMetadata =  applyCreateIndexRequest(currentState, request, false);
+                    org.opensearch.cluster.metadata.Metadata indexMetadata1 =
+                        clusterStateCreateIndexMetadata(currentState.metadata(), indexMetadata, null);
+                    ClusterBlocks blocks = clusterStateCreateBlocks(currentState.blocks(), request.blocks(), indexMetadata);
+                    RoutingTable routing = clusterStateRoutingTable(currentState, indexMetadata, allocationService::reroute);
+                    return org.opensearch.cluster.ClusterState.builder(currentState).metadata(indexMetadata1).blocks(blocks).routingTable(routing).build();
                 }
 
                 @Override
@@ -414,11 +568,11 @@ public class MetadataCreateIndexService {
      * Handles the cluster state transition to a version that reflects the {@link CreateIndexClusterStateUpdateRequest}.
      * All the requested changes are firstly validated before mutating the {@link ClusterState}.
      */
-    public ClusterState applyCreateIndexRequest(
+    public IndexMetadata applyCreateIndexRequest(
         ClusterState currentState,
         CreateIndexClusterStateUpdateRequest request,
         boolean silent,
-        BiConsumer<Metadata.Builder, IndexMetadata> metadataTransformer
+        BiConsumer<org.opensearch.cluster.metadata.Metadata.Builder, IndexMetadata> metadataTransformer
     ) throws Exception {
 
         normalizeRequestSetting(request);
@@ -446,12 +600,11 @@ public class MetadataCreateIndexService {
             // templates), so we need to check to see if the request is creating a hidden index
             // prior to resolving which templates it matches
             final Boolean isHiddenFromRequest = IndexMetadata.INDEX_HIDDEN_SETTING.exists(request.settings())
-                ? IndexMetadata.INDEX_HIDDEN_SETTING.get(request.settings())
-                : null;
+                                                ? IndexMetadata.INDEX_HIDDEN_SETTING.get(request.settings())
+                                                : null;
 
             // Check to see if a v2 template matched
-            final String v2Template = MetadataIndexTemplateService.findV2Template(
-                currentState.metadata(),
+            final String v2Template = MetadataIndexTemplateService.findV2Template(currentState.metadata(),
                 name,
                 isHiddenFromRequest == null ? false : isHiddenFromRequest
             );
@@ -463,11 +616,8 @@ public class MetadataCreateIndexService {
             } else {
                 // A v2 template wasn't found, check the v1 templates, in the event no templates are
                 // found creation still works using the request's specified index settings
-                final List<IndexTemplateMetadata> v1Templates = MetadataIndexTemplateService.findV1Templates(
-                    currentState.metadata(),
-                    request.index(),
-                    isHiddenFromRequest
-                );
+                final List<IndexTemplateMetadata> v1Templates =
+                    MetadataIndexTemplateService.findV1Templates(currentState.metadata(), request.index(), isHiddenFromRequest);
 
                 if (v1Templates.size() > 1) {
                     DEPRECATION_LOGGER.deprecate(
@@ -483,7 +633,84 @@ public class MetadataCreateIndexService {
         }
     }
 
-    public ClusterState applyCreateIndexRequest(ClusterState currentState, CreateIndexClusterStateUpdateRequest request, boolean silent)
+    public IndexMetadata applyCreateIndexRequest(
+        org.opensearch.cluster.ClusterState currentState,
+        CreateIndexClusterStateUpdateRequest request,
+        boolean silent,
+        BiConsumer<org.opensearch.cluster.metadata.Metadata.Builder, IndexMetadata> metadataTransformer
+    ) throws Exception {
+
+        normalizeRequestSetting(request);
+        logger.trace("executing IndexCreationTask for [{}] against cluster state version [{}]", request, currentState.version());
+
+        validate(request, toState(currentState));
+
+        final Index recoverFromIndex = request.recoverFrom();
+        final IndexMetadata sourceMetadata = recoverFromIndex == null ? null : currentState.metadata().getIndexSafe(recoverFromIndex);
+
+        if (sourceMetadata != null) {
+            // If source metadata was provided, it means we're recovering from an existing index,
+            // in which case templates don't apply, so create the index from the source metadata
+            return applyCreateIndexRequestWithExistingMetadata(toState(currentState), request, silent, sourceMetadata, metadataTransformer);
+        } else {
+            // The backing index may have a different name or prefix than the data stream name.
+            final String name = request.dataStreamName() != null ? request.dataStreamName() : request.index();
+
+            // Do not apply any templates to system indices
+            if (systemIndices.isSystemIndex(name)) {
+                return applyCreateIndexRequestWithNoTemplates(toState(currentState), request, silent, metadataTransformer);
+            }
+
+            // Hidden indices apply templates slightly differently (ignoring wildcard '*'
+            // templates), so we need to check to see if the request is creating a hidden index
+            // prior to resolving which templates it matches
+            final Boolean isHiddenFromRequest = IndexMetadata.INDEX_HIDDEN_SETTING.exists(request.settings())
+                                                ? IndexMetadata.INDEX_HIDDEN_SETTING.get(request.settings())
+                                                : null;
+
+            // Check to see if a v2 template matched
+            final String v2Template = MetadataIndexTemplateService.findV2Template(currentState.metadata(),
+                name,
+                isHiddenFromRequest == null ? false : isHiddenFromRequest
+            );
+
+            if (v2Template != null) {
+                // If a v2 template was found, it takes precedence over all v1 templates, so create
+                // the index using that template and the request's specified settings
+                return applyCreateIndexRequestWithV2Template(toState(currentState), request, silent, v2Template, metadataTransformer);
+            } else {
+                // A v2 template wasn't found, check the v1 templates, in the event no templates are
+                // found creation still works using the request's specified index settings
+                final List<IndexTemplateMetadata> v1Templates =
+                    MetadataIndexTemplateService.findV1Templates(currentState.metadata(), request.index(), isHiddenFromRequest);
+
+                if (v1Templates.size() > 1) {
+                    DEPRECATION_LOGGER.deprecate(
+                        "index_template_multiple_match",
+                        "index [{}] matches multiple legacy templates [{}], composable templates will only match a single template",
+                        request.index(),
+                        v1Templates.stream().map(IndexTemplateMetadata::name).sorted().collect(Collectors.joining(", "))
+                    );
+                }
+
+                return applyCreateIndexRequestWithV1Templates(toState(currentState), request, silent, v1Templates, metadataTransformer);
+            }
+        }
+    }
+
+    public IndexMetadata  applyCreateIndexRequest(org.opensearch.cluster.ClusterState currentState, CreateIndexClusterStateUpdateRequest request, boolean silent)
+        throws Exception {
+        return applyCreateIndexRequest(toState(currentState), request, silent);
+    }
+    ClusterState toState(org.opensearch.cluster.ClusterState currentState) {
+        return  null;
+    }
+
+    org.opensearch.cluster.ClusterState toState(ClusterState currentState) {
+        return  null;
+    }
+
+    public IndexMetadata applyCreateIndexRequest(ClusterState currentState, CreateIndexClusterStateUpdateRequest request, boolean silent)
         throws Exception {
         return applyCreateIndexRequest(currentState, request, silent, null);
     }
@@ -504,7 +731,7 @@ public class MetadataCreateIndexService {
      *                            creates the index
      * @return a new cluster state with the index added
      */
-    private ClusterState applyCreateIndexWithTemporaryService(
+    private IndexMetadata applyCreateIndexWithTemporaryService(
         final ClusterState currentState,
         final CreateIndexClusterStateUpdateRequest request,
         final boolean silent,
@@ -513,10 +740,10 @@ public class MetadataCreateIndexService {
         final List<Map<String, Object>> mappings,
         final BiFunction<IndexService, Map<String, AliasMetadata>, List<AliasMetadata>> aliasSupplier,
         final List<String> templatesApplied,
-        final BiConsumer<Metadata.Builder, IndexMetadata> metadataTransformer
+        final BiConsumer<org.opensearch.cluster.metadata.Metadata.Builder, IndexMetadata> metadataTransformer
     ) throws Exception {
         // create the index here (on the master) to validate it can be created, as well as adding the mapping
-        return indicesService.<ClusterState, Exception>withTempIndexService(temporaryIndexMeta, indexService -> {
+        return indicesService.<IndexMetadata, Exception>withTempIndexService(temporaryIndexMeta, indexService -> {
             Settings.Builder tmpSettingsBuilder = Settings.builder().put(temporaryIndexMeta.getSettings());
 
             List<Map<String, Object>> updatedMappings = new ArrayList<>();
@@ -565,7 +792,7 @@ public class MetadataCreateIndexService {
             );
 
             indexService.getIndexEventListener().beforeIndexAddedToCluster(indexMetadata.getIndex(), indexMetadata.getSettings());
-            return clusterStateCreateIndex(currentState, request.blocks(), indexMetadata, allocationService::reroute, metadataTransformer);
+            return indexMetadata;
         });
     }
 
@@ -682,23 +909,68 @@ public class MetadataCreateIndexService {
         tmpImdBuilder.putCustom(IndexMetadata.REMOTE_STORE_CUSTOM_KEY, remoteCustomData);
     }
 
-    private ClusterState applyCreateIndexRequestWithNoTemplates(
+    private IndexMetadata applyCreateIndexRequestWithNoTemplates(
         final ClusterState currentState,
         final CreateIndexClusterStateUpdateRequest request,
         final boolean silent,
-        final BiConsumer<Metadata.Builder, IndexMetadata> metadataTransformer
+        final BiConsumer<org.opensearch.cluster.metadata.Metadata.Builder, IndexMetadata> metadataTransformer
     ) throws Exception {
         // Using applyCreateIndexRequestWithV1Templates with empty list instead of applyCreateIndexRequestWithV2Template
         // with null template as applyCreateIndexRequestWithV2Template has assertions when template is null
         return applyCreateIndexRequestWithV1Templates(currentState, request, silent, Collections.emptyList(), metadataTransformer);
     }
 
-    private ClusterState applyCreateIndexRequestWithV1Templates(
+
+
+
+    public interface ClusterState {
+
+        long version();
+
+        Metadata metadata();
+
+        DiscoveryNodes nodes();
+
+        Metadata getMetadata();
+
+        ClusterBlocks blocks();
+
+        RoutingTable routingTable();
+    }
+
+
+
+    public interface Metadata {
+
+        public boolean hasIndex(String targetIndexName) ;
+
+        IndexMetadata index(String targetIndexName);
+
+        Settings settings();
+
+        SortedMap<String, IndexAbstraction> getIndicesLookup();
+
+        IndexMetadata getIndexSafe(Index recoverFromIndex);
+
+        Map<String, ComposableIndexTemplate> templatesV2();
+
+        Map<String, SortedMap<Long, String>> systemTemplatesLookup();
+
+        public Map<String, ComponentTemplate> componentTemplates();
+        public Map<String, IndexTemplateMetadata> templates();
+        public static class  Builder {
+
+            public void put(DataStream rollover) {
+            }
+        }
+    }
+
+        private IndexMetadata applyCreateIndexRequestWithV1Templates(
         final ClusterState currentState,
         final CreateIndexClusterStateUpdateRequest request,
         final boolean silent,
         final List<IndexTemplateMetadata> templates,
-        final BiConsumer<Metadata.Builder, IndexMetadata> metadataTransformer
+        final BiConsumer<org.opensearch.cluster.metadata.Metadata.Builder, IndexMetadata> metadataTransformer
     ) throws Exception {
         logger.debug(
             "applying create index request using legacy templates {}",
@@ -749,12 +1021,12 @@ public class MetadataCreateIndexService {
         );
     }
 
-    private ClusterState applyCreateIndexRequestWithV2Template(
+    private IndexMetadata applyCreateIndexRequestWithV2Template(
         final ClusterState currentState,
         final CreateIndexClusterStateUpdateRequest request,
         final boolean silent,
         final String templateName,
-        final BiConsumer<Metadata.Builder, IndexMetadata> metadataTransformer
+        final BiConsumer<org.opensearch.cluster.metadata.Metadata.Builder, IndexMetadata> metadataTransformer
     ) throws Exception {
         logger.debug("applying create index request using composable template [{}]", templateName);
 
@@ -803,7 +1075,7 @@ public class MetadataCreateIndexService {
                 request.aliases(),
                 Stream.concat(
                     Stream.of(contextAlias),
-                    MetadataIndexTemplateService.resolveAliases(currentState.metadata(), templateName).stream()
+                    MetadataIndexTemplateService.resolveAliases((org.opensearch.cluster.metadata.Metadata) currentState.metadata(), templateName).stream()
                 ).collect(toList()),
                 currentState.metadata(),
                 aliasValidator,
@@ -830,6 +1102,18 @@ public class MetadataCreateIndexService {
 
     public static List<Map<String, Object>> collectV2Mappings(
         final String requestMappings,
+        final org.opensearch.cluster.ClusterState currentState,
+        final String templateName,
+        final NamedXContentRegistry xContentRegistry,
+        final String indexName
+    ) throws Exception {
+        List<CompressedXContent> templateMappings = MetadataIndexTemplateService.collectMappings(currentState, templateName, indexName);
+        return collectV2Mappings(requestMappings, templateMappings, xContentRegistry);
+    }
+
+
+    public static List<Map<String, Object>> collectV2Mappings(
+        final String requestMappings,
         final List<CompressedXContent> templateMappings,
         final NamedXContentRegistry xContentRegistry
     ) throws Exception {
@@ -845,12 +1129,12 @@ public class MetadataCreateIndexService {
         return result;
     }
 
-    private ClusterState applyCreateIndexRequestWithExistingMetadata(
+    private IndexMetadata applyCreateIndexRequestWithExistingMetadata(
         final ClusterState currentState,
         final CreateIndexClusterStateUpdateRequest request,
         final boolean silent,
         final IndexMetadata sourceMetadata,
-        final BiConsumer<Metadata.Builder, IndexMetadata> metadataTransformer
+        final BiConsumer<org.opensearch.cluster.metadata.Metadata.Builder, IndexMetadata> metadataTransformer
     ) throws Exception {
         logger.info("applying create index request using existing index [{}] metadata", sourceMetadata.getIndex().getName());
 
@@ -1077,7 +1361,7 @@ public class MetadataCreateIndexService {
          * We can not validate settings until we have applied templates, otherwise we do not know the actual settings
          * that will be used to create this index.
          */
-        shardLimitValidator.validateShardLimit(request.index(), indexSettings, currentState);
+        shardLimitValidator.validateShardLimit(request.index(), indexSettings, (org.opensearch.cluster.ClusterState) currentState);
         if (IndexSettings.INDEX_SOFT_DELETES_SETTING.get(indexSettings) == false
             && IndexMetadata.SETTING_INDEX_VERSION_CREATED.get(indexSettings).onOrAfter(Version.V_2_0_0)) {
             throw new IllegalArgumentException(
@@ -1194,7 +1478,42 @@ public class MetadataCreateIndexService {
             }
         }
     }
+    public static void updateRemoteStoreSettings(
+        Settings.Builder settingsBuilder,
+        org.opensearch.cluster.ClusterState clusterState,
+        ClusterSettings clusterSettings,
+        Settings nodeSettings,
+        String indexName
+    ) {
+        if ((isRemoteDataAttributePresent(nodeSettings)
+            && clusterSettings.get(REMOTE_STORE_COMPATIBILITY_MODE_SETTING).equals(RemoteStoreNodeService.CompatibilityMode.STRICT))
+            || isMigratingToRemoteStore(clusterSettings)) {
+            String segmentRepo, translogRepo;
 
+            Optional<DiscoveryNode> remoteNode = clusterState.nodes()
+                .getNodes()
+                .values()
+                .stream()
+                .filter(DiscoveryNode::isRemoteStoreNode)
+                .findFirst();
+
+            if (remoteNode.isPresent()) {
+                translogRepo = RemoteStoreNodeAttribute.getTranslogRepoName(remoteNode.get().getAttributes());
+                segmentRepo = RemoteStoreNodeAttribute.getSegmentRepoName(remoteNode.get().getAttributes());
+                if (segmentRepo != null && translogRepo != null) {
+                    settingsBuilder.put(SETTING_REMOTE_STORE_ENABLED, true)
+                        .put(SETTING_REMOTE_SEGMENT_STORE_REPOSITORY, segmentRepo)
+                        .put(SETTING_REMOTE_TRANSLOG_STORE_REPOSITORY, translogRepo);
+                } else {
+                    ValidationException validationException = new ValidationException();
+                    validationException.addValidationErrors(
+                        Collections.singletonList("Cluster is migrating to remote store but no remote node found, failing index creation")
+                    );
+                    throw new IndexCreationException(indexName, validationException);
+                }
+            }
+        }
+    }
     public static void validateStoreTypeSettings(Settings settings) {
         // deprecate simplefs store type:
         if (IndexModule.Type.SIMPLEFS.match(IndexModule.INDEX_STORE_TYPE_SETTING.get(settings))) {
@@ -1230,29 +1549,18 @@ public class MetadataCreateIndexService {
         }
         return routingNumShards;
     }
-
-    /**
-     * Validate and resolve the aliases explicitly set for the index, together with the ones inherited from the specified
-     * templates.
-     * <p>
-     * The template mappings are applied in the order they are encountered in the list (clients should make sure the lower index, closer
-     * to the head of the list, templates have the highest {@link IndexTemplateMetadata#order()})
-     *
-     * @return the list of resolved aliases, with the explicitly provided aliases occurring first (having a higher priority) followed by
-     * the ones inherited from the templates
-     */
     public static List<AliasMetadata> resolveAndValidateAliases(
         String index,
         Set<Alias> aliases,
         List<Map<String, AliasMetadata>> templateAliases,
-        Metadata metadata,
+        org.opensearch.cluster.metadata.Metadata metadata,
         AliasValidator aliasValidator,
         NamedXContentRegistry xContentRegistry,
         QueryShardContext queryShardContext
     ) {
         List<AliasMetadata> resolvedAliases = new ArrayList<>();
         for (Alias alias : aliases) {
-            aliasValidator.validateAlias(alias, index, metadata);
+            aliasValidator.validateAlias(alias.name(), index, alias.indexRouting(), metadata::index);
             if (Strings.hasLength(alias.filter())) {
                 aliasValidator.validateAliasFilter(alias.name(), alias.filter(), queryShardContext, xContentRegistry);
             }
@@ -1288,7 +1596,81 @@ public class MetadataCreateIndexService {
                     aliasMetadata = AliasMetadata.newAliasMetadata(aliasMetadata, templatedAlias);
                 }
 
-                aliasValidator.validateAliasMetadata(aliasMetadata, index, metadata);
+                aliasValidator.validateAliasMetadata(aliasMetadata, index, (org.opensearch.cluster.metadata.Metadata) metadata);
+                if (aliasMetadata.filter() != null) {
+                    aliasValidator.validateAliasFilter(
+                        aliasMetadata.alias(),
+                        aliasMetadata.filter().uncompressed(),
+                        queryShardContext,
+                        xContentRegistry
+                    );
+                }
+                templatesAliases.put(aliasMetadata.alias(), aliasMetadata);
+                resolvedAliases.add((aliasMetadata));
+            }
+        }
+        return resolvedAliases;
+
+    }
+
+    /**
+     * Validate and resolve the aliases explicitly set for the index, together with the ones inherited from the specified
+     * templates.
+     * <p>
+     * The template mappings are applied in the order they are encountered in the list (clients should make sure the lower index, closer
+     * to the head of the list, templates have the highest {@link IndexTemplateMetadata#order()})
+     *
+     * @return the list of resolved aliases, with the explicitly provided aliases occurring first (having a higher priority) followed by
+     * the ones inherited from the templates
+     */
+    public static List<AliasMetadata> resolveAndValidateAliases(
+        String index,
+        Set<Alias> aliases,
+        List<Map<String, AliasMetadata>> templateAliases,
+        Metadata metadata,
+        AliasValidator aliasValidator,
+        NamedXContentRegistry xContentRegistry,
+        QueryShardContext queryShardContext
+    ) {
+        List<AliasMetadata> resolvedAliases = new ArrayList<>();
+        for (Alias alias : aliases) {
+            aliasValidator.validateAlias(alias.name(), index, alias.indexRouting(), metadata::index);
+            if (Strings.hasLength(alias.filter())) {
+                aliasValidator.validateAliasFilter(alias.name(), alias.filter(), queryShardContext, xContentRegistry);
+            }
+            AliasMetadata aliasMetadata = AliasMetadata.builder(alias.name())
+                .filter(alias.filter())
+                .indexRouting(alias.indexRouting())
+                .searchRouting(alias.searchRouting())
+                .writeIndex(alias.writeIndex())
+                .isHidden(alias.isHidden())
+                .build();
+            resolvedAliases.add(aliasMetadata);
+        }
+
+        Map<String, AliasMetadata> templatesAliases = new HashMap<>();
+        for (Map<String, AliasMetadata> templateAliasConfig : templateAliases) {
+            // handle aliases
+            for (Map.Entry<String, AliasMetadata> entry : templateAliasConfig.entrySet()) {
+                AliasMetadata aliasMetadata = entry.getValue();
+                // if an alias with same name came with the create index request itself,
+                // ignore this one taken from the index template
+                if (aliases.contains(new Alias(aliasMetadata.alias()))) {
+                    continue;
+                }
+                // if an alias with same name was already processed, ignore this one
+                if (templatesAliases.containsKey(entry.getKey())) {
+                    continue;
+                }
+
+                // Allow templatesAliases to be templated by replacing a token with the
+                // name of the index that we are applying it to
+                if (aliasMetadata.alias().contains("{index}")) {
+                    String templatedAlias = aliasMetadata.alias().replace("{index}", index);
+                    aliasMetadata = AliasMetadata.newAliasMetadata(aliasMetadata, templatedAlias);
+                }
+
+                aliasValidator.validateAliasMetadata(aliasMetadata, index, (org.opensearch.cluster.metadata.Metadata) metadata);
                 if (aliasMetadata.filter() != null) {
                     aliasValidator.validateAliasFilter(
                         aliasMetadata.alias(),
@@ -1308,30 +1690,65 @@ public class MetadataCreateIndexService {
      * Creates the index into the cluster state applying the provided blocks. The final cluster state will contain an updated routing
      * table based on the live nodes.
      */
-    static ClusterState clusterStateCreateIndex(
-        ClusterState currentState,
-        Set<ClusterBlock> clusterBlocks,
+//    static ClusterState clusterStateCreateIndex(
+//        ClusterState currentState,
+//        Set<ClusterBlock> clusterBlocks,
+//        IndexMetadata indexMetadata,
+//        BiFunction<ClusterState, String, org.opensearch.cluster.ClusterState> rerouteRoutingTable,
+//        BiConsumer<Metadata.Builder, IndexMetadata> metadataTransformer
+//    ) {
+//        Metadata.Builder builder = Metadata.builder(currentState.metadata()).put(indexMetadata, false);
+//        if (metadataTransformer != null) {
+//            metadataTransformer.accept(builder, indexMetadata);
+//        }
+//        Metadata newMetadata = builder.build();
+//
+//        String indexName = indexMetadata.getIndex().getName();
+//        ClusterBlocks.Builder blocks = createClusterBlocksBuilder(currentState, indexName, clusterBlocks);
+//        blocks.updateBlocks(indexMetadata);
+//
+//        ClusterState updatedState = ClusterState.builder(currentState).blocks(blocks).metadata(newMetadata).build();
+//
+//        RoutingTable.Builder routingTableBuilder = RoutingTable.builder(updatedState.routingTable())
+//            .addAsNew(updatedState.metadata().index(indexName));
+//        updatedState = ClusterState.builder(updatedState).routingTable(routingTableBuilder.build()).build();
+//        return rerouteRoutingTable.apply(updatedState, "index [" + indexName + "] created");
+//    }
+
+
+    static org.opensearch.cluster.metadata.Metadata clusterStateCreateIndexMetadata(
+        org.opensearch.cluster.metadata.Metadata oldMetadata,
         IndexMetadata indexMetadata,
-        BiFunction<ClusterState, String, ClusterState> rerouteRoutingTable,
-        BiConsumer<Metadata.Builder, IndexMetadata> metadataTransformer
-    ) {
-        Metadata.Builder builder = Metadata.builder(currentState.metadata()).put(indexMetadata, false);
+        BiConsumer<org.opensearch.cluster.metadata.Metadata.Builder, IndexMetadata> metadataTransformer){
+        org.opensearch.cluster.metadata.Metadata.Builder builder = org.opensearch.cluster.metadata.Metadata.builder(oldMetadata).put(indexMetadata, false);
         if (metadataTransformer != null) {
             metadataTransformer.accept(builder, indexMetadata);
         }
-        Metadata newMetadata = builder.build();
+        return builder.build();
 
+    }
+
+    static ClusterBlocks clusterStateCreateBlocks(ClusterBlocks oldBlocks, Set<ClusterBlock> clusterBlocks,
+        IndexMetadata indexMetadata) {
         String indexName = indexMetadata.getIndex().getName();
-        ClusterBlocks.Builder blocks = createClusterBlocksBuilder(currentState, indexName, clusterBlocks);
-        blocks.updateBlocks(indexMetadata);
 
-        ClusterState updatedState = ClusterState.builder(currentState).blocks(blocks).metadata(newMetadata).build();
+        ClusterBlocks.Builder blocks = createClusterBlocksBuilder(oldBlocks, indexName, clusterBlocks);
+        blocks.updateBlocks(indexMetadata);
+        return blocks.build();
+    }
+
+    static RoutingTable
+    clusterStateRoutingTable(org.opensearch.cluster.ClusterState updatedState,
+        IndexMetadata indexMetadata,
+        BiFunction<org.opensearch.cluster.ClusterState, String, org.opensearch.cluster.ClusterState> rerouteRoutingTable) {
+        String indexName = indexMetadata.getIndex().getName();
 
         RoutingTable.Builder routingTableBuilder = RoutingTable.builder(updatedState.routingTable())
             .addAsNew(updatedState.metadata().index(indexName));
-        updatedState = ClusterState.builder(updatedState).routingTable(routingTableBuilder.build()).build();
-        return rerouteRoutingTable.apply(updatedState, "index [" + indexName + "] created");
+        updatedState = org.opensearch.cluster.ClusterState.builder(updatedState).routingTable(routingTableBuilder.build()).build();
+        return rerouteRoutingTable.apply(updatedState, "index [" + indexName + "] created").routingTable();
     }
+
 
     static IndexMetadata buildIndexMetadata(
         String indexName,
@@ -1405,8 +1822,8 @@ public class MetadataCreateIndexService {
         return builder;
     }
 
-    private static ClusterBlocks.Builder createClusterBlocksBuilder(ClusterState currentState, String index, Set<ClusterBlock> blocks) {
-        ClusterBlocks.Builder blocksBuilder = ClusterBlocks.builder().blocks(currentState.blocks());
+    private static ClusterBlocks.Builder createClusterBlocksBuilder(ClusterBlocks oldBlocks, String index, Set<ClusterBlock> blocks) {
+        ClusterBlocks.Builder blocksBuilder = ClusterBlocks.builder().blocks(oldBlocks);
         if (!blocks.isEmpty()) {
             for (ClusterBlock block : blocks) {
                 blocksBuilder.addIndexBlock(index, block);
