@@ -31,7 +31,10 @@
 
 package org.opensearch.cluster;
 
+import java.util.function.Function;
+import org.opensearch.cluster.coordination.ClusterStatePublisher;
 import org.opensearch.cluster.service.ClusterManagerTaskThrottler;
+import org.opensearch.cluster.service.MasterService;
 import org.opensearch.common.Nullable;
 import org.opensearch.common.annotation.PublicApi;
 
@@ -100,6 +103,20 @@ public interface ClusterStateTaskExecutor<T> {
         // User can't configure throttling limit on it and will be bypassed while throttling on cluster manager
         return ClusterManagerTaskThrottler.DEFAULT_THROTTLING_KEY;
     }
+
+    default String publisherType() {
+        return "";
+    }
+
+    default<V> V getPreviousState() {
+     return  null;
+    }
+
+    default<V> void publish(V table,  MasterService.TaskOutputs taskOutputs, long startTimeNanos, Runnable defaultPublisher) {
+
+        defaultPublisher.run();
+    }
+
 
     /**
      * Represents the result of a batched execution of cluster state update tasks

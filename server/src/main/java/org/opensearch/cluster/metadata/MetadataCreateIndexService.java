@@ -32,6 +32,7 @@
 
 package org.opensearch.cluster.metadata;
 
+import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -64,6 +65,7 @@ import org.opensearch.cluster.routing.allocation.AwarenessReplicaBalance;
 import org.opensearch.cluster.service.ClusterManagerTaskKeys;
 import org.opensearch.cluster.service.ClusterManagerTaskThrottler;
 import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.cluster.service.MasterService;
 import org.opensearch.common.Nullable;
 import org.opensearch.common.Priority;
 import org.opensearch.common.UUIDs;
@@ -370,8 +372,118 @@ public class MetadataCreateIndexService {
         final ActionListener<ClusterStateUpdateResponse> listener
     ) {
         normalizeRequestSetting(request);
+        ClusterState myLocalState = clusterService.state();
+        ClusterState.Builder updatedState = ClusterState.builder(myLocalState);
+        final AtomicReference<ClusterState.Builder> updatedState1 = new AtomicReference<>(updatedState);
         clusterService.submitStateUpdateTask(
             "create-index [" + request.index() + "], cause [" + request.cause() + "]",
+            new AckedClusterStateUpdateTask<ClusterStateUpdateResponse>(Priority.URGENT, request,  ActionListener.wrap(new Runnable() {
+                @Override
+                public void run() {
+                    logger.info("create index metadata complete");
+                }
+            })) {
+                @Override
+                protected ClusterStateUpdateResponse newResponse(boolean acknowledged) {
+                    return new ClusterStateUpdateResponse(acknowledged);
+                }
+
+                @Override
+                public ClusterManagerTaskThrottler.ThrottlingKey getClusterManagerThrottlingKey() {
+                    return createIndexTaskKey;
+                }
+
+                @Override
+                public ClusterState execute(ClusterState currentState) throws Exception {
+                    Metadata metadata = applyAndGetMetadata(currentState, request, false);
+                    return ClusterState.builder(currentState).metadata(metadata).build();
+                }
+
+                @Override
+                public void onFailure(String source, Exception e) {
+                    if (e instanceof ResourceAlreadyExistsException) {
+                        logger.trace(() -> new ParameterizedMessage("[{}] failed to create", request.index()), e);
+                    } else {
+                        logger.debug(() -> new ParameterizedMessage("[{}] failed to create", request.index()), e);
+                    }
+                    super.onFailure(source, e);
+                }
+
+                @Override
+                public Metadata getPreviousState() {
+                    return updatedState1.get().build().metadata();
+                }
+
+                @Override
+                public String publisherType() {
+                    return "metadata";
+                }
+
+                @Override
+                public <V> void publish(V table, MasterService.TaskOutputs taskOutputs, long startTimeNanos, Runnable defaultPublisher) {
+                    Metadata metadata = (Metadata)table;
+                    updatedState1.set(updatedState1.get().metadata(metadata));
+                    //super.publish(table, taskOutputs, startTimeNanos, defaultPublisher);
+                }
+            }
+        );
+
+        clusterService.submitStateUpdateTask(
+            "create-index-block [" + request.index() + "], cause [" + request.cause() + "]",
+            new AckedClusterStateUpdateTask<ClusterStateUpdateResponse>(Priority.URGENT, request,  ActionListener.wrap(new Runnable() {
+                @Override
+                public void run() {
+                    logger.info("create index block complete");
+                }
+            })) {
+                @Override
+                protected ClusterStateUpdateResponse newResponse(boolean acknowledged) {
+                    return new ClusterStateUpdateResponse(acknowledged);
+                }
+
+                @Override
+                public ClusterManagerTaskThrottler.ThrottlingKey getClusterManagerThrottlingKey() {
+                    return createIndexTaskKey;
+                }
+
+                @Override
+                public ClusterState execute(ClusterState currentState) throws Exception {
+                    ClusterBlocks blocks = clusterStateCreateBlocks(currentState.blocks(), request.blocks(), currentState.getMetadata().index(request.index()));
+                    ClusterState updatedState = ClusterState.builder(currentState).blocks(blocks).build();
+                    return updatedState;
+                }
+
+                @Override
+                public void onFailure(String source, Exception e) {
+                    if (e instanceof ResourceAlreadyExistsException) {
+                        logger.trace(() -> new ParameterizedMessage("[{}] failed to create", request.index()), e);
+                    } else {
+                        logger.debug(() -> new ParameterizedMessage("[{}] failed to create", request.index()), e);
+                    }
+                    super.onFailure(source, e);
+                }
+
+                @Override
+                public ClusterBlocks getPreviousState() {
+                    return updatedState1.get().build().blocks();
+                }
+
+                @Override
+                public String publisherType() {
+                    return "blocks";
+                }
+
+                @Override
+                public <V> void publish(V table, MasterService.TaskOutputs taskOutputs, long startTimeNanos, Runnable defaultPublisher) {
+                    ClusterBlocks blocks = (ClusterBlocks)table;
+                    updatedState1.set(updatedState1.get().blocks(blocks));
+                    //super.publish(table, taskOutputs, startTimeNanos, defaultPublisher);
+                }
+            }
+        );
+
+        clusterService.submitStateUpdateTask(
+            "create-index-routing [" + request.index() + "], cause [" + request.cause() + "]",
             new AckedClusterStateUpdateTask<ClusterStateUpdateResponse>(Priority.URGENT, request, listener) {
                 @Override
                 protected ClusterStateUpdateResponse newResponse(boolean acknowledged) {
@@ -385,7 +497,12 @@ public class MetadataCreateIndexService {
 
                 @Override
                 public ClusterState execute(ClusterState currentState) throws Exception {
-                    return applyCreateIndexRequest(currentState, request, false);
+                    RoutingTable indexRoutingTables = clusterStateRoutingTable(
+                        currentState,
+                        currentState.getMetadata().index(request.index()),
+                        allocationService::reroute
+                    );
+                    return ClusterState.builder(currentState).routingTable(indexRoutingTables).build();
                 }
 
                 @Override
@@ -396,6 +513,16 @@ public class MetadataCreateIndexService {
                         logger.debug(() -> new ParameterizedMessage("[{}] failed to create", request.index()), e);
                     }
                     super.onFailure(source, e);
+                }
+
+                @Override
+                public ClusterState getPreviousState() {
+                    return updatedState1.get().build();
+                }
+
+                @Override
+                public String publisherType() {
+                    return "routing";
                 }
             }
         );
@@ -481,6 +608,10 @@ public class MetadataCreateIndexService {
                 return applyCreateIndexRequestWithV1Templates(currentState, request, silent, v1Templates, metadataTransformer);
             }
         }
+    }
+    public Metadata applyAndGetMetadata(ClusterState currentState, CreateIndexClusterStateUpdateRequest request, boolean silent)
+        throws Exception {
+        return applyCreateIndexRequest(currentState, request, silent, null).getMetadata();
     }
 
     public ClusterState applyCreateIndexRequest(ClusterState currentState, CreateIndexClusterStateUpdateRequest request, boolean silent)
@@ -1321,18 +1452,52 @@ public class MetadataCreateIndexService {
         }
         Metadata newMetadata = builder.build();
 
-        String indexName = indexMetadata.getIndex().getName();
-        ClusterBlocks.Builder blocks = createClusterBlocksBuilder(currentState, indexName, clusterBlocks);
-        blocks.updateBlocks(indexMetadata);
+//        String indexName = indexMetadata.getIndex().getName();
+//        ClusterBlocks.Builder blocks = createClusterBlocksBuilder(currentState, indexName, clusterBlocks);
+//        blocks.updateBlocks(indexMetadata);
+//
+//        ClusterState updatedState = ClusterState.builder(currentState).blocks(blocks).metadata(newMetadata).build();
+//
+//        RoutingTable.Builder routingTableBuilder = RoutingTable.builder(updatedState.routingTable())
+//            .addAsNew(updatedState.metadata().index(indexName));
+//        updatedState = ClusterState.builder(updatedState).routingTable(routingTableBuilder.build()).build();
+//        return rerouteRoutingTable.apply(updatedState, "index [" + indexName + "] created");
+        return ClusterState.builder(currentState).metadata(newMetadata).build();
+    }
 
-        ClusterState updatedState = ClusterState.builder(currentState).blocks(blocks).metadata(newMetadata).build();
+
+    static org.opensearch.cluster.metadata.Metadata clusterStateCreateIndexMetadata(
+        org.opensearch.cluster.metadata.Metadata oldMetadata,
+        IndexMetadata indexMetadata,
+        BiConsumer<org.opensearch.cluster.metadata.Metadata.Builder, IndexMetadata> metadataTransformer){
+        org.opensearch.cluster.metadata.Metadata.Builder builder = org.opensearch.cluster.metadata.Metadata.builder(oldMetadata).put(indexMetadata, false);
+        if (metadataTransformer != null) {
+            metadataTransformer.accept(builder, indexMetadata);
+        }
+        return builder.build();
+
+    }
+
+    static ClusterBlocks clusterStateCreateBlocks(ClusterBlocks oldBlocks, Set<ClusterBlock> clusterBlocks,
+        IndexMetadata indexMetadata) {
+        String indexName = indexMetadata.getIndex().getName();
+
+        ClusterBlocks.Builder blocks = createClusterBlocksBuilder(oldBlocks, indexName, clusterBlocks);
+        blocks.updateBlocks(indexMetadata);
+        return blocks.build();
+    }
+
+    static RoutingTable
+    clusterStateRoutingTable(ClusterState updatedState,
+        IndexMetadata indexMetadata,
+        BiFunction<ClusterState, String, org.opensearch.cluster.ClusterState> rerouteRoutingTable) {
+        String indexName = indexMetadata.getIndex().getName();
 
         RoutingTable.Builder routingTableBuilder = RoutingTable.builder(updatedState.routingTable())
             .addAsNew(updatedState.metadata().index(indexName));
-        updatedState = ClusterState.builder(updatedState).routingTable(routingTableBuilder.build()).build();
-        return rerouteRoutingTable.apply(updatedState, "index [" + indexName + "] created");
+        updatedState = org.opensearch.cluster.ClusterState.builder(updatedState).routingTable(routingTableBuilder.build()).build();
+        return rerouteRoutingTable.apply(updatedState, "index [" + indexName + "] created").routingTable();
     }
-
     static IndexMetadata buildIndexMetadata(
         String indexName,
         List<AliasMetadata> aliases,
@@ -1405,8 +1570,8 @@ public class MetadataCreateIndexService {
         return builder;
     }
 
-    private static ClusterBlocks.Builder createClusterBlocksBuilder(ClusterState currentState, String index, Set<ClusterBlock> blocks) {
-        ClusterBlocks.Builder blocksBuilder = ClusterBlocks.builder().blocks(currentState.blocks());
+    private static ClusterBlocks.Builder createClusterBlocksBuilder(ClusterBlocks oldblocks, String index, Set<ClusterBlock> blocks) {
+        ClusterBlocks.Builder blocksBuilder = ClusterBlocks.builder().blocks(oldblocks);
         if (!blocks.isEmpty()) {
             for (ClusterBlock block : blocks) {
                 blocksBuilder.addIndexBlock(index, block);
