@@ -32,6 +32,7 @@
 
 package org.opensearch.cluster.service;
 
+import java.util.HashMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
@@ -46,9 +47,11 @@ import org.opensearch.cluster.ClusterStateTaskConfig;
 import org.opensearch.cluster.ClusterStateTaskExecutor;
 import org.opensearch.cluster.ClusterStateTaskExecutor.ClusterTasksResult;
 import org.opensearch.cluster.ClusterStateTaskListener;
-import org.opensearch.cluster.block.ClusterBlocks;
 import org.opensearch.cluster.coordination.ClusterStatePublisher;
 import org.opensearch.cluster.coordination.FailedToCommitClusterStateException;
+import org.opensearch.cluster.coordination.IndexMetadataPersistenceService;
+import org.opensearch.cluster.coordination.ShardRoutingPersistenceService;
+import org.opensearch.cluster.metadata.RemoteMetadataRef;
 import org.opensearch.cluster.metadata.Metadata;
 import org.opensearch.cluster.metadata.ProcessClusterEventTimeoutException;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -70,7 +73,6 @@ import org.opensearch.common.util.concurrent.PrioritizedOpenSearchThreadPoolExec
 import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.common.util.concurrent.ThreadContextAccess;
 import org.opensearch.core.Assertions;
-import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.text.Text;
 import org.opensearch.core.concurrency.OpenSearchRejectedExecutionException;
 import org.opensearch.discovery.Discovery;
@@ -319,19 +321,22 @@ public class MasterService extends AbstractLifecycleComponent {
         } else {
             logger.debug("executing cluster state update for [{}]", summary);
         }
-        ClusterState previousClusterState = state();
-        if (taskInputs.executor.publisherType().equals("")) {
-            previousClusterState = state();
-        } else if(taskInputs.executor.publisherType().equals("metadata")) {
-            Metadata metadata = taskInputs.executor.getPreviousState();
-            previousClusterState = ClusterState.builder(previousClusterState).metadata(metadata).build();
-        }else if(taskInputs.executor.publisherType().equals("blocks")) {
-            ClusterBlocks blocks = taskInputs.executor.getPreviousState();
-            previousClusterState = ClusterState.builder(previousClusterState).blocks(blocks).build();
-        }else if(taskInputs.executor.publisherType().equals("routing")) {
-            ClusterState table = taskInputs.executor.getPreviousState();
-            previousClusterState = ClusterState.builder(previousClusterState).metadata(table.metadata()).routingTable(table.routingTable()).build();
-        }
+        ClusterState previousClusterState = ClusterApplierService.expandRemoteRefs(state());
+//        if (taskInputs.executor.publisherType().equals("")) {
+//            previousClusterState = state();
+//        } else if(taskInputs.executor.publisherType().equals("metadata")) {
+////            Metadata metadata = taskInputs.executor.getPreviousState();
+////            previousClusterState = ClusterState.builder(previousClusterState).metadata(metadata).build();
+//            previousClusterState = taskInputs.executor.getPreviousState();
+//        }else if(taskInputs.executor.publisherType().equals("blocks")) {
+////            ClusterBlocks blocks = taskInputs.executor.getPreviousState();
+////            previousClusterState = ClusterState.builder(previousClusterState).blocks(blocks).build();
+//            previousClusterState = taskInputs.executor.getPreviousState();
+//        }else if(taskInputs.executor.publisherType().equals("routing")) {
+//           // ClusterState table = taskInputs.executor.getPreviousState();
+//           //  = ClusterState.builder(previousClusterState).metadata(table.metadata()).routingTable(table.routingTable()).build();
+//            previousClusterState = taskInputs.executor.getPreviousState();
+//        }
 
 
         if (!previousClusterState.nodes().isLocalNodeElectedClusterManager() && taskInputs.runOnlyWhenClusterManager()) {
@@ -366,7 +371,8 @@ public class MasterService extends AbstractLifecycleComponent {
             }
             final long publicationStartTime = threadPool.preciseRelativeTimeInNanos();
             try {
-                ClusterChangedEvent clusterChangedEvent = new ClusterChangedEvent(summary, newClusterState, previousClusterState);
+                final ClusterState newClusterStateWithoutIndexMetadata = ClusterState.builder(newClusterState).metadata(Metadata.builder(newClusterState.metadata()).removeAllIndices().build()).build();
+                ClusterChangedEvent clusterChangedEvent = new ClusterChangedEvent(summary, newClusterStateWithoutIndexMetadata, previousClusterState);
                 // new cluster state, notify all listeners
                 final DiscoveryNodes.Delta nodesDelta = clusterChangedEvent.nodesDelta();
                 if (nodesDelta.hasChanges() && logger.isInfoEnabled()) {
@@ -381,25 +387,50 @@ public class MasterService extends AbstractLifecycleComponent {
                         );
                     }
                 }
-
                 logger.debug("publishing cluster state version [{}]", newClusterState.version());
-                if (taskInputs.executor.publisherType().equals("")) {
+ //               publish(clusterChangedEvent, taskOutputs, publicationStartTime);
+                if (taskInputs.executor.executorType().equals("")) {
                     publish(clusterChangedEvent, taskOutputs, publicationStartTime);
-                } else if(taskInputs.executor.publisherType().equals("metadata")) {
-                    Metadata metadata = clusterChangedEvent.state().metadata();
-                    taskInputs.executor.publish(metadata, taskOutputs, publicationStartTime, ()->{
-                        publish(clusterChangedEvent, taskOutputs, publicationStartTime);
-                    });
-                }else if(taskInputs.executor.publisherType().equals("blocks")) {
-                    ClusterBlocks blocks = clusterChangedEvent.state().blocks();
-                    taskInputs.executor.publish(blocks, taskOutputs, publicationStartTime, ()->{
-                        publish(clusterChangedEvent, taskOutputs, publicationStartTime);
-                    });
-                }else if(taskInputs.executor.publisherType().equals("routing")) {
-                    RoutingTable table = clusterChangedEvent.state().routingTable();
-                    taskInputs.executor.publish(table, taskOutputs, publicationStartTime, ()->{
-                        publish(clusterChangedEvent, taskOutputs, publicationStartTime);
-                    });
+                } else if(taskInputs.executor.executorType().equals("metadata")) {
+                    ClusterStatePublisher.ClusterStateUpdateResult componentsChanged = taskOutputs.updateResult;
+
+                    IndexMetadataPersistenceService publisher = new IndexMetadataPersistenceService();
+                    RemoteMetadataRef indexRemoteRef =
+                        publisher.persist(new IndexMetadataPersistenceService.IndexMetadataChangeEvent(summary, componentsChanged.updatedMetadata));
+                    ClusterState newClusterState1 = ClusterState.builder(clusterChangedEvent.state()).putRemoteRef(indexRemoteRef.refType, indexRemoteRef).build();
+                    ClusterChangedEvent clusterChangedEvent1 = new ClusterChangedEvent(summary, newClusterState1, previousClusterState);
+                    // ClusterMetadataExternalReference reference = publishToExternalService(componentsChanged.updatedMetadata);
+                    publish(clusterChangedEvent1, taskOutputs, publicationStartTime);
+                } else if(taskInputs.executor.executorType().equals("blocks")) {
+                    publish(clusterChangedEvent, taskOutputs, publicationStartTime);
+                } else if(taskInputs.executor.executorType().equals("routing")) {
+                    ClusterStatePublisher.ClusterStateUpdateResult componentsChanged = taskOutputs.updateResult;
+                    ClusterState.Builder newClusterStateb = ClusterState.builder(clusterChangedEvent.state());
+                    {
+                        IndexMetadataPersistenceService publisher = new IndexMetadataPersistenceService();
+                        RemoteMetadataRef indexRemoteRef = publisher.persist(new IndexMetadataPersistenceService.IndexMetadataChangeEvent(summary,
+                            componentsChanged.updatedMetadata
+                        ));
+                        newClusterStateb = newClusterStateb.putRemoteRef(indexRemoteRef.refType, indexRemoteRef);
+                    }
+                    {
+                        if(componentsChanged.updatedRoutingTables!=null) {
+                            ShardRoutingPersistenceService publisher = new ShardRoutingPersistenceService();
+                            RemoteMetadataRef routingTableRemoteRef = publisher.persist(new ShardRoutingPersistenceService.RoutingTableChangeEvent(summary,
+                                componentsChanged.updatedRoutingTables
+                            ));
+                            newClusterStateb = newClusterStateb.putRemoteRef(routingTableRemoteRef.refType, routingTableRemoteRef);
+                        }
+
+                    }
+//                    RoutingTable table = clusterChangedEvent.state().routingTable();
+//                    taskInputs.executor.publish(table, taskOutputs, publicationStartTime, ()->{
+//                        publish(clusterChangedEvent, taskOutputs, publicationStartTime);
+//                    });
+                    ClusterState newClusterState1 = newClusterStateb.build();
+                    ClusterChangedEvent clusterChangedEvent1 = new ClusterChangedEvent(summary, newClusterState1, previousClusterState);
+                    publish(clusterChangedEvent1, taskOutputs, publicationStartTime);
+
                 }
             } catch (Exception e) {
                 handleException(summary, publicationStartTime, newClusterState, e);
@@ -418,6 +449,7 @@ public class MasterService extends AbstractLifecycleComponent {
                 return isClusterManagerUpdateThread() || super.blockingAllowed();
             }
         };
+        logger.info("publishing {}",  clusterChangedEvent.state());
         clusterStatePublisher.publish(clusterChangedEvent, fut, taskOutputs.createAckListener(threadPool, clusterChangedEvent.state()));
 
         // indefinitely wait for publication to complete
@@ -505,7 +537,8 @@ public class MasterService extends AbstractLifecycleComponent {
             previousClusterState,
             newClusterState,
             getNonFailedTasks(taskInputs, clusterTasksResult),
-            clusterTasksResult.executionResults
+            clusterTasksResult.executionResults,
+            clusterTasksResult.updateResult
         );
     }
 
@@ -588,18 +621,22 @@ public class MasterService extends AbstractLifecycleComponent {
         final List<Batcher.UpdateTask> nonFailedTasks;
         final Map<Object, ClusterStateTaskExecutor.TaskResult> executionResults;
 
+        final ClusterStatePublisher.ClusterStateUpdateResult updateResult;
+
         TaskOutputs(
             TaskInputs taskInputs,
             ClusterState previousClusterState,
             ClusterState newClusterState,
             List<Batcher.UpdateTask> nonFailedTasks,
-            Map<Object, ClusterStateTaskExecutor.TaskResult> executionResults
+            Map<Object, ClusterStateTaskExecutor.TaskResult> executionResults,
+            ClusterStatePublisher.ClusterStateUpdateResult updateResult
         ) {
             this.taskInputs = taskInputs;
             this.previousClusterState = previousClusterState;
             this.newClusterState = newClusterState;
             this.nonFailedTasks = nonFailedTasks;
             this.executionResults = executionResults;
+            this.updateResult  = updateResult;
         }
 
         void publishingFailed(FailedToCommitClusterStateException t) {

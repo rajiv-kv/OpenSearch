@@ -32,6 +32,7 @@
 
 package org.opensearch.cluster.metadata;
 
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
@@ -54,6 +55,7 @@ import org.opensearch.cluster.applicationtemplates.SystemTemplatesService;
 import org.opensearch.cluster.block.ClusterBlock;
 import org.opensearch.cluster.block.ClusterBlockLevel;
 import org.opensearch.cluster.block.ClusterBlocks;
+import org.opensearch.cluster.coordination.ClusterStatePublisher;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.routing.IndexRoutingTable;
@@ -376,7 +378,7 @@ public class MetadataCreateIndexService {
         ClusterState.Builder updatedState = ClusterState.builder(myLocalState);
         final AtomicReference<ClusterState.Builder> updatedState1 = new AtomicReference<>(updatedState);
         clusterService.submitStateUpdateTask(
-            "create-index [" + request.index() + "], cause [" + request.cause() + "]",
+            "create-index-metadata [" + request.index() + "], cause [" + request.cause() + "]",
             new AckedClusterStateUpdateTask<ClusterStateUpdateResponse>(Priority.URGENT, request,  ActionListener.wrap(new Runnable() {
                 @Override
                 public void run() {
@@ -394,9 +396,9 @@ public class MetadataCreateIndexService {
                 }
 
                 @Override
-                public ClusterState execute(ClusterState currentState) throws Exception {
-                    Metadata metadata = applyAndGetMetadata(currentState, request, false);
-                    return ClusterState.builder(currentState).metadata(metadata).build();
+                public ClusterStatePublisher.ClusterStateUpdateResult executeAndResult(ClusterState currentState) throws Exception {
+                    IndexMetadata metadata = applyAndGetMetadata(currentState, request, false);
+                    return new ClusterStatePublisher.ClusterStateUpdateResult(Arrays.asList(metadata));
                 }
 
                 @Override
@@ -410,20 +412,8 @@ public class MetadataCreateIndexService {
                 }
 
                 @Override
-                public Metadata getPreviousState() {
-                    return updatedState1.get().build().metadata();
-                }
-
-                @Override
-                public String publisherType() {
+                public String executorType() {
                     return "metadata";
-                }
-
-                @Override
-                public <V> void publish(V table, MasterService.TaskOutputs taskOutputs, long startTimeNanos, Runnable defaultPublisher) {
-                    Metadata metadata = (Metadata)table;
-                    updatedState1.set(updatedState1.get().metadata(metadata));
-                    //super.publish(table, taskOutputs, startTimeNanos, defaultPublisher);
                 }
             }
         );
@@ -447,10 +437,9 @@ public class MetadataCreateIndexService {
                 }
 
                 @Override
-                public ClusterState execute(ClusterState currentState) throws Exception {
+                public ClusterStatePublisher.ClusterStateUpdateResult executeAndResult(ClusterState currentState) throws Exception {
                     ClusterBlocks blocks = clusterStateCreateBlocks(currentState.blocks(), request.blocks(), currentState.getMetadata().index(request.index()));
-                    ClusterState updatedState = ClusterState.builder(currentState).blocks(blocks).build();
-                    return updatedState;
+                    return new ClusterStatePublisher.ClusterStateUpdateResult(blocks);
                 }
 
                 @Override
@@ -463,21 +452,10 @@ public class MetadataCreateIndexService {
                     super.onFailure(source, e);
                 }
 
-                @Override
-                public ClusterBlocks getPreviousState() {
-                    return updatedState1.get().build().blocks();
-                }
 
                 @Override
-                public String publisherType() {
+                public String executorType() {
                     return "blocks";
-                }
-
-                @Override
-                public <V> void publish(V table, MasterService.TaskOutputs taskOutputs, long startTimeNanos, Runnable defaultPublisher) {
-                    ClusterBlocks blocks = (ClusterBlocks)table;
-                    updatedState1.set(updatedState1.get().blocks(blocks));
-                    //super.publish(table, taskOutputs, startTimeNanos, defaultPublisher);
                 }
             }
         );
@@ -496,13 +474,19 @@ public class MetadataCreateIndexService {
                 }
 
                 @Override
-                public ClusterState execute(ClusterState currentState) throws Exception {
-                    RoutingTable indexRoutingTables = clusterStateRoutingTable(
+                public ClusterStatePublisher.ClusterStateUpdateResult executeAndResult(ClusterState currentState) throws Exception {
+                   // return applyCreateIndexRequest(currentState, request, false);
+                    ClusterState indexRoutingTables = clusterStateRoutingTable(
                         currentState,
                         currentState.getMetadata().index(request.index()),
                         allocationService::reroute
                     );
-                    return ClusterState.builder(currentState).routingTable(indexRoutingTables).build();
+                    logger.info("Reroute apply metadata {} ", indexRoutingTables.getMetadata().index(request.index()));
+                    logger.info("clusterstate  {}", indexRoutingTables);
+
+                    return new ClusterStatePublisher.ClusterStateUpdateResult(Arrays.asList(indexRoutingTables.getMetadata().index(request.index())),
+                        Arrays.asList(indexRoutingTables.routingTable().getIndicesRouting().get(request.index())));
+
                 }
 
                 @Override
@@ -516,12 +500,7 @@ public class MetadataCreateIndexService {
                 }
 
                 @Override
-                public ClusterState getPreviousState() {
-                    return updatedState1.get().build();
-                }
-
-                @Override
-                public String publisherType() {
+                public String executorType() {
                     return "routing";
                 }
             }
@@ -609,9 +588,9 @@ public class MetadataCreateIndexService {
             }
         }
     }
-    public Metadata applyAndGetMetadata(ClusterState currentState, CreateIndexClusterStateUpdateRequest request, boolean silent)
+    public IndexMetadata applyAndGetMetadata(ClusterState currentState, CreateIndexClusterStateUpdateRequest request, boolean silent)
         throws Exception {
-        return applyCreateIndexRequest(currentState, request, silent, null).getMetadata();
+        return applyCreateIndexRequest(currentState, request, silent, null).getMetadata().index(request.index());
     }
 
     public ClusterState applyCreateIndexRequest(ClusterState currentState, CreateIndexClusterStateUpdateRequest request, boolean silent)
@@ -1453,7 +1432,7 @@ public class MetadataCreateIndexService {
         Metadata newMetadata = builder.build();
 
 //        String indexName = indexMetadata.getIndex().getName();
-//        ClusterBlocks.Builder blocks = createClusterBlocksBuilder(currentState, indexName, clusterBlocks);
+//        ClusterBlocks.Builder blocks = createClusterBlocksBuilder(currentState.blocks(), indexName, clusterBlocks);
 //        blocks.updateBlocks(indexMetadata);
 //
 //        ClusterState updatedState = ClusterState.builder(currentState).blocks(blocks).metadata(newMetadata).build();
@@ -1487,7 +1466,7 @@ public class MetadataCreateIndexService {
         return blocks.build();
     }
 
-    static RoutingTable
+    static ClusterState
     clusterStateRoutingTable(ClusterState updatedState,
         IndexMetadata indexMetadata,
         BiFunction<ClusterState, String, org.opensearch.cluster.ClusterState> rerouteRoutingTable) {
@@ -1496,7 +1475,7 @@ public class MetadataCreateIndexService {
         RoutingTable.Builder routingTableBuilder = RoutingTable.builder(updatedState.routingTable())
             .addAsNew(updatedState.metadata().index(indexName));
         updatedState = org.opensearch.cluster.ClusterState.builder(updatedState).routingTable(routingTableBuilder.build()).build();
-        return rerouteRoutingTable.apply(updatedState, "index [" + indexName + "] created").routingTable();
+        return rerouteRoutingTable.apply(updatedState, "index [" + indexName + "] created");//.routingTable();
     }
     static IndexMetadata buildIndexMetadata(
         String indexName,

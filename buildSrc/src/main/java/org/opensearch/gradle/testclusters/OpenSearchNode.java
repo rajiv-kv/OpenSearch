@@ -1191,6 +1191,7 @@ public class OpenSearchNode implements TestClusterConfiguration {
         // TODO: Remove these once https://github.com/elastic/elasticsearch/issues/46091 is fixed
         baseConfig.put("logger.org.opensearch.action.support.master", "DEBUG");
         baseConfig.put("logger.org.opensearch.cluster.coordination", "DEBUG");
+        baseConfig.put("logger.org.opensearch.indices.cluster", "DEBUG");
 
         HashSet<String> overriden = new HashSet<>(baseConfig.keySet());
         overriden.retainAll(settings.keySet());

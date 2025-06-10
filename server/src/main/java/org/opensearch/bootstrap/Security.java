@@ -414,6 +414,8 @@ final class Security {
         // http is simple
         final String httpRange = HttpTransportSettings.SETTING_HTTP_PORT.get(settings).getPortRangeString();
         addSocketPermissionForPortRange(policy, httpRange);
+        policy.add(new SocketPermission("127.0.0.1:50051", "connect,resolve"));
+
     }
 
     /**

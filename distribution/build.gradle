@@ -318,7 +318,7 @@ configure(subprojects.findAll { ['archives', 'packages'].contains(it.name) }) {
         canBeResolved = true
         attributes {
           attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, Category.LIBRARY))
-          attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME))
+          attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_API))
           attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling, Bundling.EXTERNAL))
         }
       }

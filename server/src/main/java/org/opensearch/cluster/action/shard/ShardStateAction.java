@@ -32,6 +32,8 @@
 
 package org.opensearch.cluster.action.shard;
 
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
@@ -45,6 +47,7 @@ import org.opensearch.cluster.ClusterStateTaskConfig;
 import org.opensearch.cluster.ClusterStateTaskExecutor;
 import org.opensearch.cluster.ClusterStateTaskListener;
 import org.opensearch.cluster.NotClusterManagerException;
+import org.opensearch.cluster.coordination.ClusterStatePublisher;
 import org.opensearch.cluster.coordination.FailedToCommitClusterStateException;
 import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -812,7 +815,16 @@ public class ShardStateAction {
                 builder.failures(tasksToBeApplied, e);
             }
 
-            return builder.build(maybeUpdatedState);
+            ClusterTasksResult<StartedShardEntry> build = builder.build(maybeUpdatedState);
+            List<IndexMetadata> targetCollection = StreamSupport.stream(maybeUpdatedState.getMetadata().spliterator(), false)
+                .collect(Collectors.toList());
+            build.updateResult = new ClusterStatePublisher.ClusterStateUpdateResult(targetCollection);
+            return build;
+        }
+
+        @Override
+        public String executorType() {
+            return "routing";
         }
 
         @Override

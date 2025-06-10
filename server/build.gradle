@@ -59,6 +59,10 @@ sourceSets {
   }
 }
 
+def grpcVersion = '1.73.0' // CURRENT_GRPC_VERSION
+//def protobufVersion = '3.25.5'
+//def protocVersion = protobufVersion
+
 dependencies {
 
   api project(':libs:opensearch-common')
@@ -69,12 +73,19 @@ dependencies {
   api project(":libs:opensearch-geo")
   api project(":libs:opensearch-telemetry")
   api project(":libs:opensearch-task-commons")
+   api("io.grpc:grpc-api:${grpcVersion}")
+    api("io.grpc:grpc-protobuf:${grpcVersion}")
+    api ("io.grpc:grpc-stub:${grpcVersion}")
+    api "io.grpc:grpc-services:${grpcVersion}"
+    runtimeOnly("com.google.guava:guava:33.3.1-jre")
 
-
+    implementation("com.google.code.findbugs:jsr305:3.0.2")
   compileOnly project(':libs:opensearch-plugin-classloader')
   testRuntimeOnly project(':libs:opensearch-plugin-classloader')
+    api "com.google.errorprone:error_prone_annotations:2.30.0"
+    api "io.grpc:grpc-netty-shaded:${grpcVersion}"
 
-  api libs.bundles.lucene
+    api libs.bundles.lucene
 
   // utilities
   api project(":libs:opensearch-cli")

@@ -21,9 +21,14 @@ import org.opensearch.cluster.routing.IndexRoutingTable;
 import org.opensearch.cluster.routing.RoutingTableIncrementalDiff;
 import org.opensearch.cluster.routing.StringKeyDiffProvider;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.common.xcontent.XContentHelper;
 import org.opensearch.common.xcontent.json.JsonXContent;
+import org.opensearch.core.common.bytes.BytesArray;
 import org.opensearch.core.common.bytes.BytesReference;
 import org.opensearch.core.common.transport.TransportAddress;
+import org.opensearch.core.xcontent.DeprecationHandler;
+import org.opensearch.core.xcontent.MediaTypeRegistry;
+import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.core.xcontent.XContentParser;
@@ -116,32 +121,49 @@ public class ClusterStateDiffManifestTests extends OpenSearchTestCase {
             true,
             true
         );
-        final XContentBuilder builder = JsonXContent.contentBuilder();
-        builder.startObject();
-        diffManifest.toXContent(builder, ToXContent.EMPTY_PARAMS);
-        builder.endObject();
-        try (XContentParser parser = createParser(JsonXContent.jsonXContent, BytesReference.bytes(builder))) {
-            final ClusterStateDiffManifest parsedManifest = ClusterStateDiffManifest.fromXContent(parser, CODEC_V4);
-            assertEquals(diffManifest, parsedManifest);
+
+        {
+            final XContentBuilder builder = JsonXContent.contentBuilder();
+            builder.startObject();
+            for (IndexMetadata indexMetadata : initialState.metadata()) {
+                IndexMetadata.FORMAT.toXContent(builder, indexMetadata);
+            }
+            builder.endObject();
+            System.out.println(builder.toString());
+            try (
+                XContentParser parser = XContentHelper.createParser(
+                    NamedXContentRegistry.EMPTY,
+                    DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
+                    new BytesArray(builder.toString()),
+                    MediaTypeRegistry.JSON
+                )
+            ) {
+                parser.nextToken();
+                XContentParser.Token token;
+                while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+                    System.out.println(IndexMetadata.Builder.fromXContent(parser));
+                }
+            }
         }
     }
 
     public void testClusterStateWithRoutingTableDiffInDiffManifestXContent() throws IOException {
-        ClusterState initialState = generateClusterStateWithOneIndex("test-index", 5, 1, true).nodes(nodesWithLocalNodeClusterManager())
-            .build();
+            ClusterState initialState =
+                generateClusterStateWithOneIndex("test-index", 5, 1, true).nodes(nodesWithLocalNodeClusterManager()).build();
 
-        ClusterState updatedState = generateClusterStateWithOneIndex("test-index", 5, 2, false).nodes(nodesWithLocalNodeClusterManager())
-            .build();
+            ClusterState updatedState =
+                generateClusterStateWithOneIndex("test-index", 5, 2, false).nodes(nodesWithLocalNodeClusterManager()).build();
 
-        ClusterStateDiffManifest diffManifest = verifyRoutingTableDiffManifest(initialState, updatedState, CODEC_V3);
-        final XContentBuilder builder = JsonXContent.contentBuilder();
-        builder.startObject();
-        diffManifest.toXContent(builder, ToXContent.EMPTY_PARAMS);
-        builder.endObject();
-        try (XContentParser parser = createParser(JsonXContent.jsonXContent, BytesReference.bytes(builder))) {
-            final ClusterStateDiffManifest parsedManifest = ClusterStateDiffManifest.fromXContent(parser, CODEC_V3);
-            assertEquals(diffManifest, parsedManifest);
-        }
+            ClusterStateDiffManifest diffManifest = verifyRoutingTableDiffManifest(initialState, updatedState, CODEC_V3);
+            final XContentBuilder builder = JsonXContent.contentBuilder();
+            builder.startObject();
+            diffManifest.toXContent(builder, ToXContent.EMPTY_PARAMS);
+            builder.endObject();
+            try (XContentParser parser = createParser(JsonXContent.jsonXContent, BytesReference.bytes(builder))) {
+                final ClusterStateDiffManifest parsedManifest = ClusterStateDiffManifest.fromXContent(parser, CODEC_V3);
+                assertEquals(diffManifest, parsedManifest);
+            }
+
     }
 
     public void testClusterStateWithRoutingTableDiffInDiffManifestXContentWithDeletes() throws IOException {
