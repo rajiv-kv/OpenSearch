@@ -39,13 +39,9 @@ import org.opensearch.Version;
 import org.opensearch.common.Booleans;
 import org.opensearch.common.SetOnce;
 import org.opensearch.common.annotation.PublicApi;
-//import org.opensearch.common.logging.DeprecationLogger;
-//import org.opensearch.common.logging.LogConfigurator;
-//import org.opensearch.common.unit.MemorySizeValue;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.util.io.IOUtils;
-//import org.opensearch.common.xcontent.LoggingDeprecationHandler;
-//import org.opensearch.common.xcontent.XContentType;
+import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.common.Strings;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
@@ -90,7 +86,6 @@ import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.opensearch.common.settings.AbstractScopedSettings.ARCHIVED_SETTINGS_PREFIX;
 import static org.opensearch.common.unit.TimeValue.parseTimeValue;
 import static org.opensearch.core.common.unit.ByteSizeValue.parseBytesSizeValue;
 
@@ -263,6 +258,16 @@ public final class Settings implements ToXContentFragment {
     }
 
     /**
+     * Returns the setting value associated with the setting key.
+     *
+     * @param setting The setting key
+     * @return The setting value, {@code null} if it does not exists.
+     */
+    public Object getAsObject(String setting) {
+        return settings.get(setting);
+    }
+
+    /**
      * Returns the setting value associated with the setting key. If it does not exists,
      * returns the default value provided.
      */
@@ -343,12 +348,12 @@ public final class Settings implements ToXContentFragment {
     }
 
     /**
-//     * We have to lazy initialize the deprecation logger as otherwise a static logger here would be constructed before logging is configured
-//     *
+    //     * We have to lazy initialize the deprecation logger as otherwise a static logger here would be constructed before logging is configured
+    //     *
      * @opensearch.internal
      */
     static class DeprecationLoggerHolder {
-        //static DeprecationLogger deprecationLogger = DeprecationLogger.getLogger(Settings.class);
+        // static DeprecationLogger deprecationLogger = DeprecationLogger.getLogger(Settings.class);
     }
 
     /**
@@ -381,7 +386,8 @@ public final class Settings implements ToXContentFragment {
      * (eg. 12%). If it does not exists, parses the default value provided.
      */
     public ByteSizeValue getAsMemory(String setting, String defaultValue) throws SettingsException {
-        return parseBytesSizeValue(get(setting, defaultValue), setting);//MemorySizeValue.parseBytesSizeValueOrHeapRatio(get(setting, defaultValue), setting);
+        return parseBytesSizeValue(get(setting, defaultValue), setting);// MemorySizeValue.parseBytesSizeValueOrHeapRatio(get(setting,
+                                                                        // defaultValue), setting);
     }
 
     /**
@@ -653,7 +659,7 @@ public final class Settings implements ToXContentFragment {
         return innerBuilder.build();
     }
 
-    private static void fromXContent(XContentParser parser, StringBuilder keyBuilder, Settings.Builder builder, boolean allowNullValues)
+    private static void fromXContent(XContentParser parser, StringBuilder keyBuilder, Builder builder, boolean allowNullValues)
         throws IOException {
         final int length = keyBuilder.length();
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -1096,10 +1102,7 @@ public final class Settings implements ToXContentFragment {
          * Loads settings from the actual string content that represents them using {@link #fromXContent(XContentParser)}
          */
         public Builder loadFromSource(String source, MediaType mediaType) {
-            try (
-                XContentParser parser = mediaType.xContent()
-                    .createParser(NamedXContentRegistry.EMPTY, null, source)
-            ) {
+            try (XContentParser parser = mediaType.xContent().createParser(NamedXContentRegistry.EMPTY, null, source)) {
                 this.put(fromXContent(parser, true, true));
             } catch (Exception e) {
                 throw new SettingsException("Failed to load settings from [" + source + "]", e);
@@ -1124,7 +1127,7 @@ public final class Settings implements ToXContentFragment {
             if (resourceName.endsWith(".json")) {
                 mediaType = MediaTypeRegistry.JSON;
             } else if (resourceName.endsWith(".yml") || resourceName.endsWith(".yaml")) {
-                mediaType = MediaType.fromMediaType("YAML");
+                mediaType = XContentType.YAML;
             } else {
                 throw new IllegalArgumentException("unable to detect content type from resource name [" + resourceName + "]");
             }

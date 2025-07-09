@@ -45,6 +45,8 @@ import org.opensearch.core.common.transport.TransportAddress;
 import org.opensearch.core.xcontent.ToXContentFragment;
 import org.opensearch.core.xcontent.XContentBuilder;
 
+import javax.net.ssl.SNIHostName;
+
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
@@ -60,6 +62,8 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.opensearch.node.NodeRoleSettings.NODE_ROLES_SETTING;
+
 /**
  * A discovery node represents a node that is part of the cluster.
  *
@@ -69,6 +73,40 @@ import java.util.stream.Stream;
 public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
 
     static final String COORDINATING_ONLY = "coordinating_only";
+    public static final Setting<String> NODE_NAME_SETTING = Setting.simpleString("node.name", Setting.Property.NodeScope);
+    public static final Setting.AffixSetting<String> NODE_ATTRIBUTES = Setting.prefixKeySetting(
+        "node.attr.",
+        (key) -> new Setting<>(key, "", (value) -> {
+            if (value.length() > 0
+                && (Character.isWhitespace(value.charAt(0)) || Character.isWhitespace(value.charAt(value.length() - 1)))) {
+                throw new IllegalArgumentException(key + " cannot have leading or trailing whitespace " + "[" + value + "]");
+            }
+            if (value.length() > 0 && "node.attr.server_name".equals(key)) {
+                try {
+                    new SNIHostName(value);
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("invalid node.attr.server_name [" + value + "]", e);
+                }
+            }
+            return value;
+        }, Setting.Property.NodeScope)
+    );
+
+    public static final Setting<Boolean> NODE_LOCAL_STORAGE_SETTING = Setting.boolSetting(
+        "node.local_storage",
+        true,
+        Setting.Property.Deprecated,
+        Setting.Property.NodeScope
+    );
+
+    public static boolean nodeRequiresLocalStorage(Settings settings) {
+        boolean localStorageEnable = NODE_LOCAL_STORAGE_SETTING.get(settings);
+        if (localStorageEnable == false && (isDataNode(settings) || isClusterManagerNode(settings))) {
+            // TODO: make this a proper setting validation logic, requiring multi-settings validation
+            throw new IllegalArgumentException("storage can not be disabled for cluster-manager and data nodes");
+        }
+        return localStorageEnable;
+    }
 
     public static boolean hasRole(final Settings settings, final DiscoveryNodeRole role) {
         /*
@@ -112,8 +150,6 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
     public static boolean isSearchNode(Settings settings) {
         return hasRole(settings, DiscoveryNodeRole.SEARCH_ROLE);
     }
-
-
 
     private final String nodeName;
     private final String nodeId;
@@ -260,6 +296,23 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
         };
         assert predicate.test(attributes) : attributes;
         this.roles = Collections.unmodifiableSortedSet(new TreeSet<>(roles));
+    }
+
+    /** Creates a DiscoveryNode representing the local node. */
+    public static DiscoveryNode createLocal(Settings settings, TransportAddress publishAddress, String nodeId) {
+        Map<String, String> attributes = NODE_ATTRIBUTES.getAsMap(settings);
+        Set<DiscoveryNodeRole> roles = getRolesFromSettings(settings);
+        return new DiscoveryNode(NODE_NAME_SETTING.get(settings), nodeId, publishAddress, attributes, roles, Version.CURRENT);
+    }
+
+    /** extract node roles from the given settings */
+    public static Set<DiscoveryNodeRole> getRolesFromSettings(final Settings settings) {
+        if (NODE_ROLES_SETTING.exists(settings)) {
+            validateLegacySettings(settings, roleMap);
+            return Collections.unmodifiableSet(new HashSet<>(NODE_ROLES_SETTING.get(settings)));
+        } else {
+            return roleMap.values().stream().filter(s -> s.isEnabledByDefault(settings)).collect(Collectors.toSet());
+        }
     }
 
     private static void validateLegacySettings(final Settings settings, final Map<String, DiscoveryNodeRole> roleMap) {
@@ -425,6 +478,15 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
     }
 
     /**
+     * Due to the way that plugins may not be available when settings are being initialized,
+     * not all roles may be available from a static/initializing context such as a {@link Setting}
+     * default value function. In that case, be warned that this may not include all plugin roles.
+     */
+    public static boolean isDataNode(final Settings settings) {
+        return getRolesFromSettings(settings).stream().anyMatch(DiscoveryNodeRole::canContainData);
+    }
+
+    /**
      * Can this node become cluster-manager or not.
      */
     public boolean isClusterManagerNode() {
@@ -466,6 +528,10 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
         return roles.contains(DiscoveryNodeRole.SEARCH_ROLE);
     }
 
+    public static boolean isDedicatedSearchNode(Settings settings) {
+        return getRolesFromSettings(settings).stream().allMatch(DiscoveryNodeRole.SEARCH_ROLE::equals);
+    }
+
     /**
      * Returns whether the node is a remote store node.
      *
@@ -473,7 +539,8 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
      */
     public boolean isRemoteStoreNode() {
         return false;
-        //return RemoteStoreNodeAttribute.isClusterStateRepoConfigured(this.getAttributes()) && RemoteStoreNodeAttribute.isSegmentRepoConfigured(this.getAttributes());
+        // return RemoteStoreNodeAttribute.isClusterStateRepoConfigured(this.getAttributes()) &&
+        // RemoteStoreNodeAttribute.isSegmentRepoConfigured(this.getAttributes());
     }
 
     /**
@@ -482,7 +549,8 @@ public class DiscoveryNode implements VerifiableWriteable, ToXContentFragment {
      */
     public boolean isRemoteStatePublicationEnabled() {
         return false;
-        //return RemoteStoreNodeAttribute.isClusterStateRepoConfigured(this.getAttributes()) && RemoteStoreNodeAttribute.isRoutingTableRepoConfigured(this.getAttributes());
+        // return RemoteStoreNodeAttribute.isClusterStateRepoConfigured(this.getAttributes()) &&
+        // RemoteStoreNodeAttribute.isRoutingTableRepoConfigured(this.getAttributes());
     }
 
     /**

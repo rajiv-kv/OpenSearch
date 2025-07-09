@@ -41,6 +41,7 @@ import org.opensearch.common.Nullable;
 import org.opensearch.common.annotation.PublicApi;
 import org.opensearch.common.collect.Tuple;
 import org.opensearch.common.regex.Regex;
+import org.opensearch.common.unit.MemorySizeValue;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.common.Strings;
@@ -2256,7 +2257,7 @@ public class Setting<T> implements ToXContentObject {
 
         @Override
         public ByteSizeValue apply(String s) {
-            return parseBytesSizeValue(s, key);
+            return MemorySizeValue.parseBytesSizeValueOrHeapRatio(s, key);
         }
 
         public boolean equals(Object obj) {
@@ -2282,7 +2283,7 @@ public class Setting<T> implements ToXContentObject {
      * @return the setting object
      */
     public static Setting<ByteSizeValue> memorySizeSetting(String key, Setting<ByteSizeValue> fallbackSetting, Property... properties) {
-        return new Setting<>(key, fallbackSetting, (s) -> parseBytesSizeValue(s, key), properties);
+        return new Setting<>(key, fallbackSetting, (s) -> MemorySizeValue.parseBytesSizeValueOrHeapRatio(s, key), properties);
     }
 
     public static <T> Setting<List<T>> listSetting(

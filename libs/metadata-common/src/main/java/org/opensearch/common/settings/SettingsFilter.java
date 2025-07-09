@@ -41,6 +41,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -84,6 +85,11 @@ public final class SettingsFilter {
         return AbstractScopedSettings.isValidKey(pattern) || Regex.isSimpleMatchPattern(pattern);
     }
 
+    public void addFilterSettingParams(Map<String, String> params) {
+        if (patterns.isEmpty() == false) {
+            params.put(SETTINGS_FILTER_PARAM, patternString);
+        }
+    }
 
     public static Settings filterSettings(Params params, Settings settings) {
         String patterns = params.param(SETTINGS_FILTER_PARAM);
